@@ -201,13 +201,37 @@ export class AccountingBooksService {
       take,
     });
 
-    const dataWithContra = lines.map((line) => ({
-      ...line,
-      contraAccounts: line.journalEntry.lines.map((l) => ({
-        code: l.account.code,
-        name: l.account.name,
-      })),
-    }));
+    // Compute global STT (row number in General Journal) for each line in the period
+    const allPeriodLineIds = await this.prisma.journalEntryLine.findMany({
+      where: {
+        journalEntry: {
+          companyId,
+          status: 'POSTED',
+          postingDate: { gte: new Date(startDate), lte: new Date(endDate) },
+        },
+      },
+      select: { id: true },
+      orderBy: [{ journalEntry: { postingDate: 'asc' } }, { lineOrder: 'asc' }],
+    });
+    const sttMap = new Map<string, number>();
+    allPeriodLineIds.forEach((l, idx) => sttMap.set(l.id, idx + 1));
+
+    // Compute running balance per line
+    let runningBalance = opening.balance;
+    const dataWithContra = (lines as typeof lines & { journalEntry: { lines: { account: { code: string; name: string } }[] } }[]).map((line) => {
+      runningBalance = runningBalance.add(line.debitAmount).sub(line.creditAmount);
+      const jeLines = (line as unknown as { journalEntry: { lines: Array<{ account: { code: string; name: string } }> } }).journalEntry.lines;
+      return {
+        ...line,
+        sttNkc: sttMap.get(line.id) ?? null,
+        runningBalance,
+        isNegativeBalance: runningBalance.lt(ZERO),
+        contraAccounts: jeLines.map((l) => ({
+          code: l.account.code,
+          name: l.account.name,
+        })),
+      };
+    });
 
     const period = this.computeBalance(lines);
     const closingBalance = opening.balance.add(period.balance);
@@ -828,6 +852,7 @@ export class AccountingBooksService {
           name: l.account.name,
         })),
         runningBalance,
+        isNegativeBalance: runningBalance.lt(ZERO),
         // Enhanced voucher info for Cash Book (TT200/TT133 compliance)
         voucher: voucher ? {
           voucherType: voucher.voucherType,

@@ -22,6 +22,7 @@ interface JournalEntryLineData {
 
 interface CreateJournalEntryData {
   postingDate: string | Date;
+  documentDate?: string | Date;  // Ngày chứng từ (original document date)
   description: string;
   entryType?: 'STANDARD' | 'ADJUSTMENT' | 'CLOSING' | 'REVERSAL' | 'OPENING';
   lines: JournalEntryLineData[];
@@ -95,6 +96,7 @@ export class JournalEntryService {
         fiscalYearId,
         entryNumber,
         postingDate: new Date(data.postingDate),
+        documentDate: data.documentDate ? new Date(data.documentDate) : new Date(data.postingDate),
         description: data.description,
         status: 'DRAFT',
         entryType: data.entryType ?? 'STANDARD',

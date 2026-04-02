@@ -9,6 +9,8 @@ interface RequestOptions {
 class ApiClient {
   private accessToken: string | null = null;
   private companyId: string | null = null;
+  // Shared promise to deduplicate concurrent refresh calls
+  private refreshPromise: Promise<string | null> | null = null;
 
   setAccessToken(token: string | null) {
     this.accessToken = token;
@@ -18,25 +20,82 @@ class ApiClient {
     this.companyId = id;
   }
 
-  async request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
+  private buildHeaders(extra?: Record<string, string>): Record<string, string> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      ...options.headers,
+      ...extra,
     };
+    if (this.accessToken) headers['Authorization'] = `Bearer ${this.accessToken}`;
+    if (this.companyId) headers['x-company-id'] = this.companyId;
+    return headers;
+  }
 
-    if (this.accessToken) {
-      headers['Authorization'] = `Bearer ${this.accessToken}`;
+  /**
+   * Attempt a token refresh. Multiple concurrent callers share the same
+   * in-flight promise so we only hit /auth/refresh once.
+   */
+  private tryRefresh(): Promise<string | null> {
+    if (this.refreshPromise) return this.refreshPromise;
+
+    this.refreshPromise = (async () => {
+      try {
+        const refreshToken =
+          typeof window !== 'undefined' ? localStorage.getItem('refreshToken') : null;
+        if (!refreshToken) return null;
+
+        const res = await fetch(`${API_BASE}/auth/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refreshToken }),
+        });
+
+        if (!res.ok) return null;
+
+        const data: { accessToken: string; refreshToken: string } = await res.json();
+        this.accessToken = data.accessToken;
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('accessToken', data.accessToken);
+          localStorage.setItem('refreshToken', data.refreshToken);
+        }
+        return data.accessToken;
+      } catch {
+        return null;
+      } finally {
+        this.refreshPromise = null;
+      }
+    })();
+
+    return this.refreshPromise;
+  }
+
+  private forceLogout() {
+    this.accessToken = null;
+    this.companyId = null;
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('refreshToken');
+      localStorage.removeItem('companyId');
+      localStorage.removeItem('companyName');
+      window.location.href = '/login';
     }
+  }
 
-    if (this.companyId) {
-      headers['x-company-id'] = this.companyId;
-    }
-
+  async request<T>(endpoint: string, options: RequestOptions = {}, isRetry = false): Promise<T> {
     const response = await fetch(`${API_BASE}${endpoint}`, {
       method: options.method || 'GET',
-      headers,
+      headers: this.buildHeaders(options.headers),
       body: options.body ? JSON.stringify(options.body) : undefined,
     });
+
+    // On 401, try to refresh once then retry the original request
+    if (response.status === 401 && !isRetry) {
+      const newToken = await this.tryRefresh();
+      if (newToken) {
+        return this.request<T>(endpoint, options, true);
+      }
+      this.forceLogout();
+      throw new Error('Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.');
+    }
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ message: 'Request failed' }));

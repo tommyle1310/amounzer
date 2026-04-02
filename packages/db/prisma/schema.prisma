@@ -225,7 +225,8 @@ model JournalEntry {
   companyId       String
   fiscalYearId    String
   entryNumber     String
-  postingDate     DateTime
+  postingDate     DateTime           // Ngày ghi sổ (recording date)
+  documentDate    DateTime?          // Ngày chứng từ (original document date, TT200/TT99)
   description     String
   status          JournalEntryStatus @default(DRAFT)
   entryType       JournalEntryType   @default(STANDARD)

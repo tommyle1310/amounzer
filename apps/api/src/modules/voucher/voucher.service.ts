@@ -139,7 +139,10 @@ export class VoucherService {
         companyId,
         data.fiscalYearId,
         {
-          postingDate: data.date,
+          // postingDate uses recordingDate (Ngày ghi sổ) if provided, else falls back to voucher date
+          postingDate: data.recordingDate ?? data.date,
+          // documentDate is always the original voucher date (Ngày chứng từ)
+          documentDate: data.date,
           description: `${data.voucherType} ${voucherNumber}: ${data.description}`,
           entryType: 'STANDARD',
           lines: data.lines.map((line, index) => ({
@@ -268,6 +271,43 @@ export class VoucherService {
     }
     if (!voucher.journalEntryId) {
       throw new BadRequestException('Chứng từ chưa có bút toán liên kết. Vui lòng tạo lại chứng từ.');
+    }
+
+    // Hard validation: prevent negative cash balance for cash-out vouchers (PC)
+    if (voucher.voucherType === 'PC') {
+      const je = await this.prisma.journalEntry.findUnique({
+        where: { id: voucher.journalEntryId },
+        include: {
+          lines: {
+            include: { account: { select: { code: true } } },
+          },
+        },
+      });
+      if (je) {
+        const cashCreditLines = je.lines.filter(
+          (l) => l.account.code.startsWith('111') && l.creditAmount.gt(0),
+        );
+        if (cashCreditLines.length > 0) {
+          const totalCashOut = cashCreditLines.reduce(
+            (sum, l) => sum.add(l.creditAmount),
+            new Prisma.Decimal(0),
+          );
+          const cashBalance = await this.prisma.journalEntryLine.aggregate({
+            where: {
+              account: { companyId, code: { startsWith: '111' } },
+              journalEntry: { companyId, status: 'POSTED' },
+            },
+            _sum: { debitAmount: true, creditAmount: true },
+          });
+          const availableBalance =
+            Number(cashBalance._sum.debitAmount ?? 0) - Number(cashBalance._sum.creditAmount ?? 0);
+          if (availableBalance < Number(totalCashOut)) {
+            throw new BadRequestException(
+              `Không đủ tồn quỹ tiền mặt. Tồn quỹ hiện tại: ${availableBalance.toLocaleString('vi-VN')} ₫, cần chi: ${Number(totalCashOut).toLocaleString('vi-VN')} ₫`,
+            );
+          }
+        }
+      }
     }
 
     // Post the linked journal entry
