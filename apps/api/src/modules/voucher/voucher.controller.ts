@@ -26,11 +26,30 @@ export class VoucherController {
     body: {
       voucherType: 'PT' | 'PC' | 'BDN' | 'BCN' | 'BT';
       date: string;
+      recordingDate?: string;
+      voucherBookNo?: string;
+      
+      // Transaction party info (TT200/TT133)
       counterpartyName?: string;
       counterpartyId?: string;
       counterpartyType?: string;
+      partyFullName?: string;
+      partyAddress?: string;
+      partyIdNumber?: string;
+      
       description: string;
       totalAmount: number;
+      amountInWords?: string;
+      
+      // Foreign currency
+      currency?: string;
+      originalAmount?: number;
+      exchangeRate?: number;
+      
+      // Supporting documents
+      attachmentCount?: number;
+      originalDocRefs?: string;
+      
       fiscalYearId: string;
       lines: Array<{
         accountId: string;

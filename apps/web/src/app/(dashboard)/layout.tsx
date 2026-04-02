@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/lib/auth-context';
 import { Button } from '@/components/ui/button';
 import {
   LayoutDashboard,
@@ -55,6 +56,7 @@ const navigation: NavItem[] = [
   { label: 'Lương', href: '/payroll', icon: <Wallet className="h-4 w-4" /> },
   { label: 'Dự phòng nợ xấu', href: '/bad-debt', icon: <ShieldAlert className="h-4 w-4" /> },
   { label: 'Khóa sổ', href: '/year-end', icon: <Lock className="h-4 w-4" /> },
+  { label: 'Cài đặt', href: '/settings', icon: <Settings className="h-4 w-4" /> },
   {
     label: 'Quản trị',
     icon: <Settings className="h-4 w-4" />,
@@ -122,6 +124,33 @@ function NavLink({ item }: { item: NavItem }) {
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [companyDropdownOpen, setCompanyDropdownOpen] = useState(false);
+  const router = useRouter();
+  const { isLoading, isAuthenticated, company, companies, setCompany, logout } = useAuth();
+
+  // Redirect to setup if no company selected
+  useEffect(() => {
+    if (!isLoading && isAuthenticated && !company) {
+      router.push('/setup');
+    }
+  }, [isLoading, isAuthenticated, company, router]);
+
+  if (isLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <div className="text-muted-foreground">Đang tải...</div>
+      </div>
+    );
+  }
+
+  // Don't render dashboard content if no company yet
+  if (!company) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <div className="text-muted-foreground">Đang chuyển trang...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -145,12 +174,36 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
 
         {/* Company switcher */}
-        <div className="border-b px-3 py-2">
-          <button className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent">
+        <div className="relative border-b px-3 py-2">
+          <button 
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent"
+            onClick={() => setCompanyDropdownOpen(!companyDropdownOpen)}
+          >
             <Building2 className="h-4 w-4 text-muted-foreground" />
-            <span className="flex-1 truncate text-left text-sm font-medium">Công ty mặc định</span>
+            <span className="flex-1 truncate text-left text-sm font-medium">
+              {company?.name || 'Chọn công ty'}
+            </span>
             <ChevronDown className="h-3 w-3 text-muted-foreground" />
           </button>
+          {companyDropdownOpen && companies.length > 1 && (
+            <div className="absolute left-3 right-3 top-full z-50 mt-1 rounded-md border bg-background shadow-md">
+              {companies.map((c) => (
+                <button
+                  key={c.id}
+                  className={cn(
+                    'flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-accent',
+                    c.id === company?.id && 'bg-accent'
+                  )}
+                  onClick={() => {
+                    setCompany(c);
+                    setCompanyDropdownOpen(false);
+                  }}
+                >
+                  {c.name}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         <nav className="flex-1 space-y-1 overflow-y-auto p-3">
@@ -181,11 +234,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => {
-                localStorage.removeItem('accessToken');
-                localStorage.removeItem('refreshToken');
-                window.location.href = '/login';
-              }}
+              onClick={logout}
             >
               <LogOut className="h-4 w-4" />
             </Button>

@@ -88,4 +88,63 @@ export class FinancialReportsController {
   ) {
     return this.financialReportsService.getAnnualPackage(req.companyId, fiscalYearId);
   }
+
+  // ── Management Reports ──
+
+  @Get('aging')
+  @Roles('ADMIN', 'ACCOUNTANT', 'MANAGER', 'VIEWER')
+  async getAgingReport(
+    @Request() req: { companyId: string },
+    @Query('asOfDate') asOfDate: string,
+    @Query('type') type?: 'receivable' | 'payable',
+  ) {
+    return this.financialReportsService.getAgingReport(req.companyId, asOfDate, type || 'receivable');
+  }
+
+  @Get('revenue')
+  @Roles('ADMIN', 'ACCOUNTANT', 'MANAGER', 'VIEWER')
+  async getRevenueReport(
+    @Request() req: { companyId: string },
+    @Query('startDate') startDate: string,
+    @Query('endDate') endDate: string,
+  ) {
+    return this.financialReportsService.getRevenueReport(req.companyId, startDate, endDate);
+  }
+
+  @Get('expenses')
+  @Roles('ADMIN', 'ACCOUNTANT', 'MANAGER', 'VIEWER')
+  async getExpensesReport(
+    @Request() req: { companyId: string },
+    @Query('startDate') startDate: string,
+    @Query('endDate') endDate: string,
+  ) {
+    return this.financialReportsService.getExpensesReport(req.companyId, startDate, endDate);
+  }
+
+  @Get('trends')
+  @Roles('ADMIN', 'ACCOUNTANT', 'MANAGER', 'VIEWER')
+  async getTrendsReport(
+    @Request() req: { companyId: string },
+    @Query('year') year: string,
+  ) {
+    return this.financialReportsService.getTrendsReport(req.companyId, year);
+  }
+
+  @Get('cash-flow-analysis')
+  @Roles('ADMIN', 'ACCOUNTANT', 'MANAGER', 'VIEWER')
+  async getCashFlowAnalysis(
+    @Request() req: { companyId: string },
+    @Query('startDate') startDate: string,
+    @Query('endDate') endDate: string,
+  ) {
+    return this.financialReportsService.getCashFlowAnalysis(req.companyId, startDate, endDate);
+  }
+
+  // ── Debug endpoint ──
+
+  @Get('_debug/data-check')
+  @Roles('ADMIN', 'ACCOUNTANT')
+  async debugDataCheck(@Request() req: { companyId: string }) {
+    return this.financialReportsService.debugDataCheck(req.companyId);
+  }
 }

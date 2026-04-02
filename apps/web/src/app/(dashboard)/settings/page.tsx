@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { formatDateVN } from '@amounzer/shared';
 import { apiClient } from '@/lib/api-client';
+import { useAuth } from '@/lib/auth-context';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -15,55 +16,75 @@ import { Save, Plus } from 'lucide-react';
 interface CompanyInfo {
   id: string;
   name: string;
-  taxCode: string;
-  address: string;
-  phone: string;
-  email: string;
-  representative: string;
+  taxCode: string | null;
+  address: string | null;
+  phone: string | null;
+  legalRepresentative: string | null;
   accountingStandard: 'TT200' | 'TT133';
+  baseCurrency: string;
+  locale: string;
 }
 
 interface FiscalYear {
   id: string;
-  year: number;
+  name: string;
   startDate: string;
   endDate: string;
-  isClosed: boolean;
+  status: 'OPEN' | 'CLOSED';
   periods: { id: string; name: string; startDate: string; endDate: string }[];
 }
 
 export default function SettingsPage() {
   const queryClient = useQueryClient();
-  const [locale, setLocale] = useState('vi');
+  const { company } = useAuth();
+  const [showNewFiscalYear, setShowNewFiscalYear] = useState(false);
+  const currentYear = new Date().getFullYear();
+  const [newFiscalYear, setNewFiscalYear] = useState({
+    name: `Năm tài chính ${currentYear}`,
+    startDate: `${currentYear}-01-01`,
+    endDate: `${currentYear}-12-31`,
+  });
 
-  const { data: company } = useQuery<CompanyInfo>({
-    queryKey: ['company-info'],
-    queryFn: () => apiClient.get('/company'),
+  const { data: companyInfo } = useQuery<CompanyInfo>({
+    queryKey: ['company-info', company?.id],
+    queryFn: () => apiClient.get(`/companies/${company!.id}`),
+    enabled: !!company?.id,
   });
 
   const [companyForm, setCompanyForm] = useState<Partial<CompanyInfo>>({});
-  const isFormLoaded = company && !companyForm.name;
-  if (isFormLoaded) {
-    setCompanyForm(company);
+  const [isFormInitialized, setIsFormInitialized] = useState(false);
+  const [locale, setLocale] = useState('vi');
+
+  // Initialize form when company info loads
+  if (companyInfo && !isFormInitialized) {
+    setCompanyForm(companyInfo);
+    setLocale(companyInfo.locale ?? 'vi');
+    setIsFormInitialized(true);
   }
 
   const { data: fiscalYears = [] } = useQuery<FiscalYear[]>({
-    queryKey: ['fiscal-years'],
-    queryFn: () => apiClient.get('/company/fiscal-years'),
+    queryKey: ['fiscal-years', company?.id],
+    queryFn: () => apiClient.get(`/companies/${company!.id}/fiscal-years`),
+    enabled: !!company?.id,
   });
 
   const saveCompanyMutation = useMutation({
-    mutationFn: (data: Partial<CompanyInfo>) => apiClient.patch('/company', data),
+    mutationFn: (data: Partial<CompanyInfo>) => apiClient.patch(`/companies/${company!.id}`, data),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['company-info'] }),
   });
 
   const createFiscalYearMutation = useMutation({
-    mutationFn: () => apiClient.post('/company/fiscal-years'),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['fiscal-years'] }),
+    mutationFn: (data: { name: string; startDate: string; endDate: string }) =>
+      apiClient.post(`/companies/${company!.id}/fiscal-years`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['fiscal-years'] });
+      setShowNewFiscalYear(false);
+    },
   });
 
   const saveLocaleMutation = useMutation({
-    mutationFn: (loc: string) => apiClient.patch('/company/locale', { locale: loc }),
+    mutationFn: (loc: string) => apiClient.patch(`/companies/${company!.id}`, { locale: loc }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['company-info'] }),
   });
 
   return (
@@ -86,8 +107,7 @@ export default function SettingsPage() {
                 <div><Label>Mã số thuế</Label><Input value={companyForm.taxCode ?? ''} onChange={e => setCompanyForm(f => ({ ...f, taxCode: e.target.value }))} /></div>
                 <div className="sm:col-span-2"><Label>Địa chỉ</Label><Input value={companyForm.address ?? ''} onChange={e => setCompanyForm(f => ({ ...f, address: e.target.value }))} /></div>
                 <div><Label>Điện thoại</Label><Input value={companyForm.phone ?? ''} onChange={e => setCompanyForm(f => ({ ...f, phone: e.target.value }))} /></div>
-                <div><Label>Email</Label><Input type="email" value={companyForm.email ?? ''} onChange={e => setCompanyForm(f => ({ ...f, email: e.target.value }))} /></div>
-                <div><Label>Người đại diện</Label><Input value={companyForm.representative ?? ''} onChange={e => setCompanyForm(f => ({ ...f, representative: e.target.value }))} /></div>
+                <div><Label>Người đại diện pháp luật</Label><Input value={companyForm.legalRepresentative ?? ''} onChange={e => setCompanyForm(f => ({ ...f, legalRepresentative: e.target.value }))} /></div>
                 <div>
                   <Label>Chế độ kế toán</Label>
                   <select className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={companyForm.accountingStandard ?? 'TT200'} onChange={e => setCompanyForm(f => ({ ...f, accountingStandard: e.target.value as 'TT200' | 'TT133' }))}>
@@ -107,19 +127,67 @@ export default function SettingsPage() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="text-lg">Năm tài chính</CardTitle>
-              <Button size="sm" onClick={() => createFiscalYearMutation.mutate()}>
+              <Button size="sm" onClick={() => setShowNewFiscalYear(true)}>
                 <Plus className="mr-2 h-4 w-4" />Tạo năm mới
               </Button>
             </CardHeader>
             <CardContent>
-              {fiscalYears.map(fy => (
+              {showNewFiscalYear && (
+                <div className="mb-6 rounded-md border p-4 bg-muted/50">
+                  <h3 className="text-base font-semibold mb-4">Tạo năm tài chính mới</h3>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 mb-4">
+                    <div>
+                      <Label>Tên</Label>
+                      <Input
+                        value={newFiscalYear.name}
+                        onChange={(e) => setNewFiscalYear((f) => ({ ...f, name: e.target.value }))}
+                        placeholder="Năm tài chính 2026"
+                      />
+                    </div>
+                    <div>
+                      <Label>Từ ngày</Label>
+                      <Input
+                        type="date"
+                        value={newFiscalYear.startDate}
+                        onChange={(e) => setNewFiscalYear((f) => ({ ...f, startDate: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <Label>Đến ngày</Label>
+                      <Input
+                        type="date"
+                        value={newFiscalYear.endDate}
+                        onChange={(e) => setNewFiscalYear((f) => ({ ...f, endDate: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => createFiscalYearMutation.mutate(newFiscalYear)}
+                      disabled={createFiscalYearMutation.isPending}
+                    >
+                      {createFiscalYearMutation.isPending ? 'Đang tạo...' : 'Tạo'}
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => setShowNewFiscalYear(false)}>
+                      Hủy
+                    </Button>
+                  </div>
+                </div>
+              )}
+              {fiscalYears.map((fy) => (
                 <div key={fy.id} className="mb-6">
                   <h3 className="text-base font-semibold mb-2">
-                    Năm {fy.year}
-                    <span className={`ml-2 text-xs px-2 py-1 rounded ${fy.isClosed ? 'text-red-600 bg-red-50' : 'text-green-600 bg-green-50'}`}>
-                      {fy.isClosed ? 'Đã khóa' : 'Mở'}
+                    {fy.name}
+                    <span
+                      className={`ml-2 text-xs px-2 py-1 rounded ${fy.status === 'CLOSED' ? 'text-red-600 bg-red-50' : 'text-green-600 bg-green-50'}`}
+                    >
+                      {fy.status === 'CLOSED' ? 'Đã khóa' : 'Mở'}
                     </span>
                   </h3>
+                  <p className="text-sm text-muted-foreground mb-2">
+                    {formatDateVN(fy.startDate)} - {formatDateVN(fy.endDate)}
+                  </p>
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -129,7 +197,7 @@ export default function SettingsPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {fy.periods.map(p => (
+                      {fy.periods.map((p) => (
                         <TableRow key={p.id}>
                           <TableCell>{p.name}</TableCell>
                           <TableCell>{formatDateVN(p.startDate)}</TableCell>
@@ -140,7 +208,9 @@ export default function SettingsPage() {
                   </Table>
                 </div>
               ))}
-              {fiscalYears.length === 0 && <p className="text-center text-muted-foreground">Chưa có năm tài chính</p>}
+              {fiscalYears.length === 0 && !showNewFiscalYear && (
+                <p className="text-center text-muted-foreground">Chưa có năm tài chính</p>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

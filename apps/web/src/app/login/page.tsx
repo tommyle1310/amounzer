@@ -6,6 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { loginSchema, twoFactorVerifySchema } from '@amounzer/shared';
 import { apiClient } from '@/lib/api-client';
+import { useAuth } from '@/lib/auth-context';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -18,6 +19,7 @@ type TwoFactorValues = z.infer<typeof twoFactorVerifySchema>;
 
 export default function LoginPage() {
   const router = useRouter();
+  const { login } = useAuth();
   const [error, setError] = useState('');
   const [needs2FA, setNeeds2FA] = useState(false);
   const [tempToken, setTempToken] = useState('');
@@ -46,9 +48,7 @@ export default function LoginPage() {
         setTempToken(res.tempToken);
         setNeeds2FA(true);
       } else if (res.accessToken) {
-        apiClient.setAccessToken(res.accessToken);
-        localStorage.setItem('accessToken', res.accessToken);
-        if (res.refreshToken) localStorage.setItem('refreshToken', res.refreshToken);
+        login(res.accessToken, res.refreshToken);
         router.push('/dashboard');
       }
     } catch (err) {
@@ -63,9 +63,7 @@ export default function LoginPage() {
         '/auth/2fa/verify',
         { code: data.code, tempToken },
       );
-      apiClient.setAccessToken(res.accessToken);
-      localStorage.setItem('accessToken', res.accessToken);
-      localStorage.setItem('refreshToken', res.refreshToken);
+      login(res.accessToken, res.refreshToken);
       router.push('/dashboard');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Mã xác thực không đúng');

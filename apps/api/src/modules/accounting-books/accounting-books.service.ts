@@ -27,6 +27,19 @@ interface BookResult {
   totals: { totalDebit: Decimal; totalCredit: Decimal };
 }
 
+// TT200/TT133 compliant header for Cash Book and Bank Book
+interface CashBookHeader {
+  companyName: string;
+  companyAddress: string;
+  accountCode: string;      // e.g., "1111", "1112"
+  accountName: string;      // e.g., "Tiền mặt VNĐ"
+  fundType: string;         // e.g., "VNĐ", "USD", "Ngoại tệ"
+  currencyUnit: string;     // e.g., "VNĐ"
+  fiscalYear: number;       // e.g., 2026
+  periodStart: string;
+  periodEnd: string;
+}
+
 const ZERO = new Decimal(0);
 
 @Injectable()
@@ -209,21 +222,95 @@ export class AccountingBooksService {
 
   async getCashBook(
     companyId: string,
-    filters: BookFilters,
+    filters: BookFilters & { subAccountCode?: string },
     pagination: Pagination,
-  ): Promise<BookResult> {
-    return this.getLedgerByAccountCode(companyId, '111', filters, pagination);
+  ): Promise<BookResult & { header: CashBookHeader }> {
+    // Get company info for header
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      select: { name: true, address: true, baseCurrency: true },
+    });
+
+    // Determine account code (default 111 or specific sub-account like 1111, 1112)
+    const accountCode = filters.subAccountCode || '111';
+    
+    // Get account info for header
+    const account = await this.prisma.ledgerAccount.findFirst({
+      where: { companyId, code: { startsWith: accountCode } },
+      select: { code: true, name: true },
+    });
+
+    const result = await this.getLedgerByAccountCode(companyId, accountCode, filters, pagination);
+    
+    // Determine currency/fund type from account code
+    const fundType = accountCode === '1112' ? 'Ngoại tệ' : 'VNĐ';
+    const currencyUnit = company?.baseCurrency || 'VNĐ';
+    
+    // Extract fiscal year from date range
+    const year = new Date(filters.startDate).getFullYear();
+
+    return {
+      ...result,
+      header: {
+        companyName: company?.name || '',
+        companyAddress: company?.address || '',
+        accountCode: account?.code || accountCode,
+        accountName: account?.name || 'Tiền mặt',
+        fundType,
+        currencyUnit,
+        fiscalYear: year,
+        periodStart: filters.startDate,
+        periodEnd: filters.endDate,
+      },
+    };
   }
 
   async getBankBook(
     companyId: string,
-    filters: BookFilters & { subAccountId?: string },
+    filters: BookFilters & { subAccountId?: string; subAccountCode?: string },
     pagination: Pagination,
-  ): Promise<BookResult> {
-    if (filters.subAccountId) {
-      return this.getLedgerByAccountId(companyId, filters.subAccountId, filters, pagination);
-    }
-    return this.getLedgerByAccountCode(companyId, '112', filters, pagination);
+  ): Promise<BookResult & { header: CashBookHeader }> {
+    // Get company info for header
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      select: { name: true, address: true, baseCurrency: true },
+    });
+
+    // Determine account code
+    const accountCode = filters.subAccountCode || '112';
+    
+    // Get account info for header
+    const account = filters.subAccountId
+      ? await this.prisma.ledgerAccount.findUnique({
+          where: { id: filters.subAccountId },
+          select: { code: true, name: true },
+        })
+      : await this.prisma.ledgerAccount.findFirst({
+          where: { companyId, code: { startsWith: accountCode } },
+          select: { code: true, name: true },
+        });
+
+    const result = filters.subAccountId
+      ? await this.getLedgerByAccountId(companyId, filters.subAccountId, filters, pagination)
+      : await this.getLedgerByAccountCode(companyId, accountCode, filters, pagination);
+
+    const currencyUnit = company?.baseCurrency || 'VNĐ';
+    const year = new Date(filters.startDate).getFullYear();
+
+    return {
+      ...result,
+      header: {
+        companyName: company?.name || '',
+        companyAddress: company?.address || '',
+        accountCode: account?.code || accountCode,
+        accountName: account?.name || 'Tiền gửi ngân hàng',
+        fundType: currencyUnit,
+        currencyUnit,
+        fiscalYear: year,
+        periodStart: filters.startDate,
+        periodEnd: filters.endDate,
+      },
+    };
   }
 
   async getCustomerLedger(
@@ -678,12 +765,18 @@ export class AccountingBooksService {
       include: {
         journalEntry: {
           select: {
+            id: true,
             entryNumber: true,
             postingDate: true,
             description: true,
+            createdAt: true,
             lines: {
               where: { accountId: { not: accountId } },
               include: { account: { select: { code: true, name: true } } },
+            },
+            // Include accounting transaction to get voucher reference (one-to-one)
+            accountingTransaction: {
+              select: { sourceType: true, sourceId: true },
             },
           },
         },
@@ -698,16 +791,54 @@ export class AccountingBooksService {
       take,
     });
 
+    // Fetch voucher data for all lines that have voucher references
+    const voucherIds = lines
+      .map((l) => l.journalEntry.accountingTransaction)
+      .filter((t): t is NonNullable<typeof t> => t !== null && t.sourceType === 'voucher')
+      .map((t) => t.sourceId);
+    
+    const vouchers = voucherIds.length > 0
+      ? await this.prisma.voucher.findMany({
+          where: { id: { in: voucherIds } },
+          select: {
+            id: true,
+            voucherType: true,
+            voucherNumber: true,
+            date: true,
+            partyFullName: true,
+            counterpartyName: true,
+          },
+        })
+      : [];
+    
+    const voucherMap = new Map(vouchers.map((v) => [v.id, v]));
+
     let runningBalance = opening.balance;
     const dataWithBalance = lines.map((line) => {
       runningBalance = runningBalance.add(line.debitAmount).sub(line.creditAmount);
+      
+      // Get voucher info if available
+      const txn = line.journalEntry.accountingTransaction;
+      const voucher = txn?.sourceType === 'voucher' ? voucherMap.get(txn.sourceId) : null;
+      
       return {
         ...line,
-        contraAccounts: line.journalEntry.lines.map((l) => ({
+        contraAccounts: line.journalEntry.lines.map((l: { account: { code: string; name: string } }) => ({
           code: l.account.code,
           name: l.account.name,
         })),
         runningBalance,
+        // Enhanced voucher info for Cash Book (TT200/TT133 compliance)
+        voucher: voucher ? {
+          voucherType: voucher.voucherType,
+          voucherNumber: voucher.voucherNumber,
+          voucherDate: voucher.date,
+          recordingDate: line.journalEntry.createdAt,
+          partyName: voucher.partyFullName ?? voucher.counterpartyName,
+          // Separate PT/PC numbers for cash book columns
+          receiptNo: voucher.voucherType === 'PT' ? voucher.voucherNumber : null,
+          paymentNo: voucher.voucherType === 'PC' ? voucher.voucherNumber : null,
+        } : null,
       };
     });
 

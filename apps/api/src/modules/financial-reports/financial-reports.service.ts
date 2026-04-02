@@ -631,4 +631,294 @@ export class FinancialReportsService {
     }
     return change;
   }
+
+  // ── Management Reports ──
+
+  async getAgingReport(companyId: string, asOfDate: string, type: 'receivable' | 'payable') {
+    const key = this.cacheKey(companyId, `aging-${type}`, { asOfDate });
+    const cached = await this.getCached(key);
+    if (cached) return cached;
+
+    const date = new Date(asOfDate);
+    const entityType = type === 'receivable' ? 'customer' : 'vendor';
+    const accountPrefix = type === 'receivable' ? '131' : '331';
+
+    // Get all customers/vendors with balances
+    const lines = await this.prisma.journalEntryLine.findMany({
+      where: {
+        account: { companyId, code: { startsWith: accountPrefix } },
+        journalEntry: { status: 'POSTED', postingDate: { lte: date } },
+        ...(type === 'receivable' ? { customerId: { not: null } } : { vendorId: { not: null } }),
+      },
+      include: {
+        customer: type === 'receivable',
+        vendor: type === 'payable',
+        journalEntry: { select: { postingDate: true } },
+      },
+    });
+
+    // Group by entity and calculate aging buckets
+    const entities = new Map<string, {
+      id: string;
+      code: string;
+      name: string;
+      current: Decimal;
+      days30: Decimal;
+      days60: Decimal;
+      days90: Decimal;
+      over90: Decimal;
+      total: Decimal;
+    }>();
+
+    for (const line of lines) {
+      const entity = type === 'receivable' ? line.customer : line.vendor;
+      if (!entity) continue;
+
+      const entityKey = entity.id;
+      if (!entities.has(entityKey)) {
+        entities.set(entityKey, {
+          id: entity.id,
+          code: entity.code,
+          name: entity.name,
+          current: ZERO,
+          days30: ZERO,
+          days60: ZERO,
+          days90: ZERO,
+          over90: ZERO,
+          total: ZERO,
+        });
+      }
+
+      const entry = entities.get(entityKey)!;
+      const amount = type === 'receivable'
+        ? line.debitAmount.sub(line.creditAmount)
+        : line.creditAmount.sub(line.debitAmount);
+
+      const daysPast = Math.floor((date.getTime() - line.journalEntry.postingDate.getTime()) / (1000 * 60 * 60 * 24));
+
+      if (daysPast <= 30) entry.current = entry.current.add(amount);
+      else if (daysPast <= 60) entry.days30 = entry.days30.add(amount);
+      else if (daysPast <= 90) entry.days60 = entry.days60.add(amount);
+      else if (daysPast <= 120) entry.days90 = entry.days90.add(amount);
+      else entry.over90 = entry.over90.add(amount);
+
+      entry.total = entry.total.add(amount);
+    }
+
+    const result = {
+      reportType: type === 'receivable' ? 'AR-Aging' : 'AP-Aging',
+      reportName: type === 'receivable' ? 'Phân tích tuổi nợ phải thu' : 'Phân tích tuổi nợ phải trả',
+      asOfDate,
+      entityType,
+      items: Array.from(entities.values()).filter(e => !e.total.eq(ZERO)),
+    };
+
+    await this.setCache(key, result);
+    return result;
+  }
+
+  async getRevenueReport(companyId: string, startDate: string, endDate: string) {
+    const key = this.cacheKey(companyId, 'revenue', { startDate, endDate });
+    const cached = await this.getCached(key);
+    if (cached) return cached;
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    const revenue = await this.getPeriodBalance(companyId, '511', start, end);
+    
+    // Group by customer
+    const lines = await this.prisma.journalEntryLine.findMany({
+      where: {
+        account: { companyId, code: { startsWith: '511' } },
+        journalEntry: { status: 'POSTED', postingDate: { gte: start, lte: end } },
+        customerId: { not: null },
+      },
+      include: { customer: true },
+    });
+
+    const byCustomer = new Map<string, { code: string; name: string; amount: Decimal }>();
+    for (const line of lines) {
+      if (!line.customer) continue;
+      const key = line.customer.id;
+      if (!byCustomer.has(key)) {
+        byCustomer.set(key, { code: line.customer.code, name: line.customer.name, amount: ZERO });
+      }
+      byCustomer.get(key)!.amount = byCustomer.get(key)!.amount.add(line.creditAmount);
+    }
+
+    const result = {
+      reportType: 'Revenue',
+      reportName: 'Báo cáo doanh thu',
+      startDate,
+      endDate,
+      totalRevenue: revenue.total,
+      byCustomer: Array.from(byCustomer.values()).sort((a, b) => b.amount.cmp(a.amount)),
+    };
+
+    await this.setCache(key, result);
+    return result;
+  }
+
+  async getExpensesReport(companyId: string, startDate: string, endDate: string) {
+    const key = this.cacheKey(companyId, 'expenses', { startDate, endDate });
+    const cached = await this.getCached(key);
+    if (cached) return cached;
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    const cogs = await this.getPeriodBalance(companyId, '632', start, end);
+    const financialExp = await this.getPeriodBalance(companyId, '635', start, end);
+    const sellingExp = await this.getPeriodBalance(companyId, '641', start, end);
+    const adminExp = await this.getPeriodBalance(companyId, '642', start, end);
+
+    const result = {
+      reportType: 'Expenses',
+      reportName: 'Báo cáo chi phí',
+      startDate,
+      endDate,
+      cogs,
+      financialExpense: financialExp,
+      sellingExpense: sellingExp,
+      adminExpense: adminExp,
+      totalExpenses: cogs.total.add(financialExp.total).add(sellingExp.total).add(adminExp.total),
+    };
+
+    await this.setCache(key, result);
+    return result;
+  }
+
+  async getTrendsReport(companyId: string, year: string) {
+    const key = this.cacheKey(companyId, 'trends', { year });
+    const cached = await this.getCached(key);
+    if (cached) return cached;
+
+    const months = [];
+    for (let m = 1; m <= 12; m++) {
+      const startDate = `${year}-${m.toString().padStart(2, '0')}-01`;
+      const endOfMonth = new Date(parseInt(year), m, 0);
+      const endDate = endOfMonth.toISOString().slice(0, 10);
+
+      const statement = await this.getIncomeStatement(companyId, startDate, endDate, false);
+      
+      months.push({
+        month: m,
+        revenue: (statement as Record<string, { total: Decimal }>).revenue?.total ?? ZERO,
+        expenses: (statement as Record<string, { total: Decimal }>).cogs?.total ?? ZERO,
+        netProfit: (statement as { netProfit: Decimal }).netProfit ?? ZERO,
+      });
+    }
+
+    const result = {
+      reportType: 'Trends',
+      reportName: 'Xu hướng tài chính',
+      year,
+      months,
+    };
+
+    await this.setCache(key, result);
+    return result;
+  }
+
+  async getCashFlowAnalysis(companyId: string, startDate: string, endDate: string) {
+    // Alias to the existing cash flow statement
+    return this.getCashFlowStatement(companyId, startDate, endDate, 'direct');
+  }
+
+  // ── Debug helper ──
+
+  async debugDataCheck(companyId: string) {
+    // Count vouchers
+    const voucherCount = await this.prisma.voucher.count({
+      where: { companyId },
+    });
+
+    const postedVouchers = await this.prisma.voucher.count({
+      where: { companyId, status: 'POSTED' },
+    });
+
+    // Count journal entries
+    const journalEntryCount = await this.prisma.journalEntry.count({
+      where: { companyId },
+    });
+
+    const postedJournalEntries = await this.prisma.journalEntry.count({
+      where: { companyId, status: 'POSTED' },
+    });
+
+    // Count journal entry lines
+    const journalLineCount = await this.prisma.journalEntryLine.count({
+      where: {
+        journalEntry: { companyId },
+      },
+    });
+
+    // Sample journal entries
+    const sampleJournalEntries = await this.prisma.journalEntry.findMany({
+      where: { companyId },
+      take: 5,
+      include: {
+        lines: {
+          include: {
+            account: { select: { code: true, name: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // Check account balances for common accounts
+    const accounts = await this.prisma.ledgerAccount.findMany({
+      where: {
+        companyId,
+        code: { in: ['111', '112', '131', '331', '411', '511', '632', '642'] },
+      },
+      select: { id: true, code: true, name: true, normalBalance: true },
+    });
+
+    const accountBalances = [];
+    for (const account of accounts) {
+      const agg = await this.prisma.journalEntryLine.aggregate({
+        where: {
+          accountId: account.id,
+          journalEntry: {
+            companyId,
+            status: 'POSTED',
+          },
+        },
+        _sum: { debitAmount: true, creditAmount: true },
+      });
+
+      accountBalances.push({
+        code: account.code,
+        name: account.name,
+        debit: agg._sum.debitAmount,
+        credit: agg._sum.creditAmount,
+      });
+    }
+
+    return {
+      companyId,
+      summary: {
+        totalVouchers: voucherCount,
+        postedVouchers,
+        totalJournalEntries: journalEntryCount,
+        postedJournalEntries,
+        totalJournalLines: journalLineCount,
+      },
+      sampleJournalEntries: sampleJournalEntries.map((je) => ({
+        id: je.id,
+        entryNumber: je.entryNumber,
+        status: je.status,
+        postingDate: je.postingDate,
+        lines: je.lines.map((l) => ({
+          account: `${l.account.code} - ${l.account.name}`,
+          debit: l.debitAmount,
+          credit: l.creditAmount,
+        })),
+      })),
+      accountBalances,
+    };
+  }
 }

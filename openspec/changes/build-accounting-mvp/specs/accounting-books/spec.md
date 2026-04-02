@@ -26,15 +26,70 @@ The system SHALL generate the General Ledger showing all transactions per accoun
 - **AND** the General Ledger for TK 511 shows the contra account as TK 111
 
 ### Requirement: Cash Book (Sổ quỹ tiền mặt - TK 111)
-The system SHALL generate the Cash Book showing all cash transactions with running balance.
+The system SHALL generate the Cash Book showing all cash transactions with running balance, following Ministry of Finance format per TT200/TT133.
+
+#### Scenario: Cash Book header fields (TT200/TT133 compliance)
+- **WHEN** a user views or exports the Sổ quỹ tiền mặt
+- **THEN** the report header includes:
+  - **Tài khoản** (Account code) — e.g., "1111 - Tiền mặt VNĐ", "1112 - Tiền mặt ngoại tệ"
+  - **Loại quỹ** (Fund type) — VNĐ, USD, EUR, or other currency
+  - **Đơn vị tính** (Currency unit) — e.g., "VNĐ", "USD"
+  - **Năm** (Fiscal year) — e.g., "2026"
+  - Company name and address
+
+#### Scenario: Cash Book body with separate voucher references
+- **WHEN** a user views the Sổ quỹ tiền mặt for a period
+- **THEN** each row shows:
+  - **Ngày tháng ghi sổ** (Recording date) — date entered into ledger
+  - **Ngày tháng chứng từ** (Document date) — date on the original voucher
+  - **Số hiệu chứng từ Thu** (Receipt voucher number) — PT number (e.g., PT-00001), blank for payments
+  - **Số hiệu chứng từ Chi** (Payment voucher number) — PC number (e.g., PC-00001), blank for receipts
+  - **Diễn giải** (Description) — transaction description
+  - **Tài khoản đối ứng** (Contra account) — the other side of the entry
+  - **Thu (Nợ)** (Debit/Receipt) — cash receipt amount
+  - **Chi (Có)** (Credit/Payment) — cash payment amount
+  - **Tồn (Số dư)** (Running balance)
 
 #### Scenario: View cash book for a period
 - **WHEN** a user views the Sổ quỹ tiền mặt for a month
-- **THEN** the report shows opening cash balance, each cash receipt and payment with voucher reference, description, amount, and running balance
+- **THEN** the report shows opening cash balance, each cash receipt and payment with separate PT/PC voucher references, description, amount, and running balance
 - **AND** the closing balance matches the current TK 111 balance
 
+#### Scenario: Cash Book footer and signatures
+- **WHEN** a user exports the Sổ quỹ tiền mặt to PDF
+- **THEN** the report footer includes:
+  - **Tổng cộng** (Totals) for receipts and payments
+  - **Ghi chú** (Notes) section — optional remarks
+  - Signature blocks: **Người ghi sổ** (Bookkeeper), **Kế toán trưởng** (Chief Accountant), **Giám đốc** (Director)
+
+#### Scenario: Multi-currency Cash Book
+- **WHEN** user views Sổ quỹ tiền mặt for TK 1112 (foreign currency cash)
+- **THEN** amounts are shown in original currency with exchange rate column
+- **AND** VND equivalent shown where applicable
+
 ### Requirement: Bank Book (Sổ tiền gửi ngân hàng - TK 112)
-The system SHALL generate the Bank Book showing all bank transactions with running balance per bank account.
+The system SHALL generate the Bank Book showing all bank transactions with running balance per bank account, following Ministry of Finance format.
+
+#### Scenario: Bank Book header fields
+- **WHEN** a user views or exports the Sổ tiền gửi ngân hàng
+- **THEN** the report header includes:
+  - **Tài khoản** (Account code) — e.g., "1121 - Tiền gửi VNĐ - Vietcombank"
+  - **Loại tiền** (Currency type) — VNĐ, USD, etc.
+  - **Đơn vị tính** (Currency unit)
+  - **Năm** (Fiscal year)
+  - **Ngân hàng** (Bank name and account number)
+
+#### Scenario: Bank Book body with voucher references
+- **WHEN** a user views the Sổ tiền gửi ngân hàng for a period
+- **THEN** each row shows:
+  - **Ngày ghi sổ** (Recording date)
+  - **Ngày chứng từ** (Document date)
+  - **Số chứng từ** (Document number) — bank debit note or credit note number
+  - **Diễn giải** (Description)
+  - **Tài khoản đối ứng** (Contra account)
+  - **Ghi nợ** (Debit) — deposits
+  - **Ghi có** (Credit) — withdrawals
+  - **Số dư** (Running balance)
 
 #### Scenario: View bank book for a specific bank account
 - **WHEN** a user views the Sổ tiền gửi ngân hàng for a specific bank sub-account (e.g., TK 1121 - Vietcombank)

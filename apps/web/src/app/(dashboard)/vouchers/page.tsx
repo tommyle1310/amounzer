@@ -70,12 +70,19 @@ export default function VouchersPage() {
   });
 
   const cancelMutation = useMutation({
-    mutationFn: (id: string) => apiClient.post(`/vouchers/${id}/cancel`),
+    mutationFn: (id: string) => apiClient.post(`/vouchers/${id}/void`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['vouchers'] }),
   });
 
   const bulkPostMutation = useMutation({
-    mutationFn: () => apiClient.post('/vouchers/bulk-post', { status: 'DRAFT' }),
+    mutationFn: () => {
+      // Get all DRAFT voucher IDs from current data
+      const draftIds = vouchers.filter((v) => v.status === 'DRAFT').map((v) => v.id);
+      if (draftIds.length === 0) {
+        return Promise.reject(new Error('Không có chứng từ nháp'));
+      }
+      return apiClient.post('/vouchers/batch-post', { ids: draftIds });
+    },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['vouchers'] }),
   });
 

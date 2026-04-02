@@ -11,6 +11,24 @@ Bạn là senior frontend developer chuyên xây dựng ứng dụng kế toán 
 - Yêu cầu: Double-entry bookkeeping UI, sổ sách kế toán (Output 1), báo cáo cực chi tiết + Dynamic Report Builder (Output 2)
 - Tối ưu cho: nhập chứng từ nhanh, xem sổ sách, filter mạnh, export PDF/Excel theo mẫu Bộ Tài chính
 
+## Critical UX Patterns for Vietnamese Accounting
+
+### Voucher Entry Forms
+- **Tổng số tiền:** Hiển thị read-only (tính từ sum của lines), có "Số tiền bằng chữ" tự động translate ngay bên cạnh
+- **Thông tin pháp lý (TT200/TT133):** Collapsible section, không bắt buộc nhưng khuuyến khích điền
+- **Autocomplete tài khoản:** Phải lưu accountId (UUID), không phải mã TK
+- **Real-time validation:** Hiển thị chênh lệch Nợ/Có ngay khi user nhập
+
+### Voucher Detail Pages
+- **Luôn hiển thị legal fields nếu có:** partyFullName, partyAddress, partyIdNumber, amountInWords, currency, etc.
+- **Status badge:** DRAFT (vàng), POSTED (xanh), VOIDED (đỏ)
+- **Conditional actions:** DRAFT → Edit + Post, POSTED → Void only
+
+### Reports Pages
+- **Default period:** Dùng năm hiện tại (current year), KHÔNG phải previous year
+- **Query params:** Đảm bảo truyền đúng startDate, endDate, asOfDate theo API spec
+- **Empty state:** Hiển thị hữu ích nếu chưa có data: "Chưa có chứng từ ghi sổ trong kỳ này"
+
 ## Execution Flow
 
 ### 1. Context Gathering (Bắt buộc)

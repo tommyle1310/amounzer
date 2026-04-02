@@ -102,8 +102,16 @@
 - [x] 2.1.6 Build voucher entry forms (keyboard shortcuts, account type-ahead)
 - [x] 2.1.7 Build voucher listing page (filter by type, date, status, counterparty)
 - [ ] 2.1.8 Write tests: voucher lifecycle, batch post, voiding
+- [ ] 2.1.9 Add legal document fields to Voucher schema (TT200/TT133 compliance): partyFullName, partyAddress, amountInWords, attachmentCount, originalDocumentRefs, voucherBookNo
+- [ ] 2.1.10 Implement Vietnamese amount-to-words conversion utility (e.g., 12500000 → "Mười hai triệu năm trăm nghìn đồng chẵn")
+- [ ] 2.1.11 Add foreign currency support to vouchers: currency, originalAmount, exchangeRate, convertedAmount
+- [ ] 2.1.12 Update voucher entry form to capture legal fields (collapsible "Thông tin pháp lý" section)
+- [ ] 2.1.13 Implement Phiếu thu PDF export (Mẫu 01-TT) with all legal fields and signature blocks
+- [ ] 2.1.14 Implement Phiếu chi PDF export (Mẫu 02-TT) with all legal fields and signature blocks
+- [ ] 2.1.15 Implement batch voucher PDF export (combined PDF or ZIP)
+- [ ] 2.1.16 Build voucher preview modal with legal document layout before export
 
-**Validation:** PT/PC created; posting generates correct journal entries; batch post works; void creates reversal.
+**Validation:** PT/PC created; posting generates correct journal entries; batch post works; void creates reversal; PDF exports match Mẫu 01-TT/02-TT format with all required legal fields.
 
 ### 2.2 Accounts Receivable & Payable (accounts-receivable-payable) â€” depends on Phase 1, can parallel with 2.1
 - [x] 2.2.1 Design Prisma schema: Customer, Vendor with sub-ledger linking (TK 131, 331)
@@ -190,8 +198,13 @@
 - [x] 3.1.15 Build unified "Sá»• sÃ¡ch káº¿ toÃ¡n" page with tabs/navigation
 - [x] 3.1.16 Add filtering (period, account, counterparty) across all books
 - [ ] 3.1.17 Write tests: each book cross-references posted journal entries correctly
+- [ ] 3.1.18 Enhance Cash Book (Sổ quỹ) with TT200/TT133 compliant header: Tài khoản, Loại quỹ, Đơn vị tính, Năm
+- [ ] 3.1.19 Add separate PT/PC voucher number columns to Cash Book (not just JE reference)
+- [ ] 3.1.20 Add Ngày ghi sổ (recording date) vs Ngày chứng từ (document date) distinction in Cash Book
+- [ ] 3.1.21 Enhance Bank Book with compliant header fields (Ngân hàng, Số tài khoản, Loại tiền)
+- [ ] 3.1.22 Add signature blocks and preparer info to accounting book PDF exports
 
-**Validation:** All accounting books render correctly; balances match; filters work.
+**Validation:** All accounting books render correctly; balances match; filters work; Cash Book shows separate PT/PC numbers with proper header.
 
 ### 3.2 Financial Reports (financial-reports) â€” depends on Phase 1 + Phase 2, can parallel with 3.1
 - [x] 3.2.1 Implement B01-DN (Báº£ng cÃ¢n Ä‘á»‘i káº¿ toÃ¡n) computation and API

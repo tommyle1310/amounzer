@@ -8,6 +8,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { JournalEntryService } from '../journal-entry/journal-entry.service';
+import { numberToVietnameseWords } from '@amounzer/shared';
 
 interface VoucherLineData {
   accountId: string;
@@ -21,11 +22,30 @@ interface VoucherLineData {
 interface CreateVoucherData {
   voucherType: 'PT' | 'PC' | 'BDN' | 'BCN' | 'BT';
   date: string | Date;
+  recordingDate?: string | Date;
+  voucherBookNo?: string;
+  
+  // Transaction party info (TT200/TT133)
   counterpartyName?: string;
   counterpartyId?: string;
   counterpartyType?: string;
+  partyFullName?: string;       // Họ tên người nộp/nhận tiền
+  partyAddress?: string;        // Địa chỉ
+  partyIdNumber?: string;       // CMND/CCCD
+  
   description: string;
   totalAmount: number;
+  amountInWords?: string;       // Manual override, auto-gen if not provided
+  
+  // Foreign currency
+  currency?: string;
+  originalAmount?: number;
+  exchangeRate?: number;
+  
+  // Supporting documents
+  attachmentCount?: number;
+  originalDocRefs?: string;
+  
   fiscalYearId: string;
   lines: VoucherLineData[];
   customFieldValues?: Record<string, unknown>;
@@ -54,52 +74,91 @@ export class VoucherService {
   ) {}
 
   async create(companyId: string, data: CreateVoucherData, userId: string) {
+    // Validate fiscal year exists BEFORE creating anything
+    const fiscalYear = await this.prisma.fiscalYear.findFirst({
+      where: { id: data.fiscalYearId, companyId },
+    });
+    if (!fiscalYear) {
+      throw new NotFoundException('Năm tài chính không tồn tại');
+    }
+    if (fiscalYear.status === 'CLOSED') {
+      throw new BadRequestException('Năm tài chính đã đóng');
+    }
+
     const voucherNumber = await this.generateVoucherNumber(
       companyId,
       data.voucherType,
     );
 
-    // Create the voucher + DRAFT journal entry in a transaction
-    const result = await this.prisma.$transaction(async (tx) => {
-      const voucher = await tx.voucher.create({
-        data: {
-          companyId,
-          voucherType: data.voucherType,
-          voucherNumber,
-          date: new Date(data.date),
-          counterpartyName: data.counterpartyName,
-          counterpartyId: data.counterpartyId,
-          counterpartyType: data.counterpartyType,
-          description: data.description,
-          totalAmount: data.totalAmount,
-          status: 'DRAFT',
-          customFieldValues: (data.customFieldValues ?? undefined) as Prisma.InputJsonValue | undefined,
-        },
-      });
+    // Auto-generate amount in words if not provided
+    const currency = data.currency || 'VND';
+    const amountForWords = currency === 'VND' ? data.totalAmount : (data.originalAmount ?? data.totalAmount);
+    const currencyWord = currency === 'VND' ? 'đồng' : currency;
+    const amountInWords = data.amountInWords || numberToVietnameseWords(amountForWords, currencyWord);
 
-      return voucher;
+    // Create the voucher with all legal fields
+    const result = await this.prisma.voucher.create({
+      data: {
+        companyId,
+        voucherType: data.voucherType,
+        voucherNumber,
+        voucherBookNo: data.voucherBookNo,
+        date: new Date(data.date),
+        recordingDate: data.recordingDate ? new Date(data.recordingDate) : undefined,
+        
+        // Transaction party info
+        counterpartyName: data.counterpartyName,
+        counterpartyId: data.counterpartyId,
+        counterpartyType: data.counterpartyType,
+        partyFullName: data.partyFullName,
+        partyAddress: data.partyAddress,
+        partyIdNumber: data.partyIdNumber,
+        
+        description: data.description,
+        totalAmount: data.totalAmount,
+        amountInWords,
+        
+        // Foreign currency
+        currency,
+        originalAmount: data.originalAmount,
+        exchangeRate: data.exchangeRate ?? 1,
+        
+        // Supporting documents
+        attachmentCount: data.attachmentCount ?? 0,
+        originalDocRefs: data.originalDocRefs,
+        
+        status: 'DRAFT',
+        customFieldValues: (data.customFieldValues ?? undefined) as Prisma.InputJsonValue | undefined,
+      },
     });
 
     // Create a DRAFT journal entry with the voucher lines
-    const journalEntry = await this.journalEntryService.create(
-      companyId,
-      data.fiscalYearId,
-      {
-        postingDate: data.date,
-        description: `${data.voucherType} ${voucherNumber}: ${data.description}`,
-        entryType: 'STANDARD',
-        lines: data.lines.map((line, index) => ({
-          accountId: line.accountId,
-          description: line.description,
-          debitAmount: line.debitAmount,
-          creditAmount: line.creditAmount,
-          lineOrder: index + 1,
-          customerId: line.customerId,
-          vendorId: line.vendorId,
-        })),
-      },
-      userId,
-    );
+    let journalEntry;
+    try {
+      journalEntry = await this.journalEntryService.create(
+        companyId,
+        data.fiscalYearId,
+        {
+          postingDate: data.date,
+          description: `${data.voucherType} ${voucherNumber}: ${data.description}`,
+          entryType: 'STANDARD',
+          lines: data.lines.map((line, index) => ({
+            accountId: line.accountId,
+            description: line.description,
+            debitAmount: line.debitAmount,
+            creditAmount: line.creditAmount,
+            lineOrder: index + 1,
+            customerId: line.customerId,
+            vendorId: line.vendorId,
+          })),
+        },
+        userId,
+      );
+    } catch (error) {
+      // If journal entry creation fails, delete the voucher to maintain consistency
+      await this.prisma.voucher.delete({ where: { id: result.id } });
+      throw error;
+    }
 
     // Link voucher to JE and create accounting transaction
     const voucher = await this.prisma.voucher.update({
@@ -205,10 +264,10 @@ export class VoucherService {
       throw new NotFoundException('Voucher not found');
     }
     if (voucher.status !== 'DRAFT') {
-      throw new BadRequestException('Only DRAFT vouchers can be posted');
+      throw new BadRequestException('Chỉ có thể ghi sổ chứng từ nháp');
     }
     if (!voucher.journalEntryId) {
-      throw new BadRequestException('Voucher has no linked journal entry');
+      throw new BadRequestException('Chứng từ chưa có bút toán liên kết. Vui lòng tạo lại chứng từ.');
     }
 
     // Post the linked journal entry
@@ -273,10 +332,10 @@ export class VoucherService {
       throw new NotFoundException('Voucher not found');
     }
     if (voucher.status !== 'POSTED') {
-      throw new BadRequestException('Only POSTED vouchers can be voided');
+      throw new BadRequestException('Chỉ có thể hủy chứng từ đã ghi sổ');
     }
     if (!voucher.journalEntryId) {
-      throw new BadRequestException('Voucher has no linked journal entry');
+      throw new BadRequestException('Chứng từ chưa có bút toán liên kết');
     }
 
     // Create reversal of the journal entry
