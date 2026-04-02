@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, Fragment } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { formatVND, formatDateVN } from '@amounzer/shared';
 import { apiClient } from '@/lib/api-client';
@@ -37,7 +37,7 @@ interface JournalEntryLine {
   };
   customer?: { name: string } | null;
   vendor?: { name: string } | null;
-  contraAccounts?: Array<{ code: string; name: string }>;
+  contraAccounts?: Array<{ code: string; name: string; debitAmount?: string | number; creditAmount?: string | number }>;
   runningBalance?: string | number;
   isNegativeBalance?: boolean;
   voucher?: {
@@ -444,38 +444,52 @@ function CashBookTable({ data }: { data: ApiBookResponse }) {
             const credit = Number(line.creditAmount) || 0;
             const runBal = Number(line.runningBalance ?? 0);
             const isNeg = line.isNegativeBalance || runBal < 0;
-            const contra = line.contraAccounts?.[0];
+            const contras = line.contraAccounts ?? [];
             const je = line.journalEntry;
             const v = line.voucher;
+            const rowSpan = contras.length > 1 ? contras.length : 1;
 
             return (
-              <TableRow
-                key={line.id}
-                className={isNeg ? 'bg-red-50 text-red-700' : ''}
-              >
-                <TableCell className="text-xs">{je?.postingDate ? formatDateVN(je.postingDate) : ''}</TableCell>
-                <TableCell className="text-xs">
-                  {v?.voucherDate
-                    ? formatDateVN(v.voucherDate)
-                    : (je?.documentDate ? formatDateVN(je.documentDate) : (je?.postingDate ? formatDateVN(je.postingDate) : ''))}
-                </TableCell>
-                <TableCell className="font-mono text-xs">{v?.receiptNo ?? ''}</TableCell>
-                <TableCell className="font-mono text-xs">{v?.paymentNo ?? ''}</TableCell>
-                <TableCell className="max-w-[180px] truncate text-xs">
-                  {line.description || je?.description || ''}
-                  {v?.partyName ? <span className="block text-muted-foreground">{v.partyName}</span> : null}
-                </TableCell>
-                <TableCell className="font-mono text-xs">
-                  {contra?.code ?? ''}
-                  {contra?.name ? <span className="text-muted-foreground"> — {contra.name}</span> : null}
-                </TableCell>
-                <TableCell className="text-right font-mono text-xs">{fmtAmt(debit)}</TableCell>
-                <TableCell className="text-right font-mono text-xs">{fmtAmt(credit)}</TableCell>
-                <TableCell className={`text-right font-mono text-xs font-medium ${isNeg ? 'text-red-600' : ''}`}>
-                  {isNeg && <AlertTriangle className="inline h-3 w-3 mr-1" />}
-                  {fmtBal(runBal)}
-                </TableCell>
-              </TableRow>
+              <Fragment key={line.id}>
+                <TableRow className={isNeg ? 'bg-red-50 text-red-700' : ''}>
+                  <TableCell className="text-xs" rowSpan={rowSpan}>{je?.postingDate ? formatDateVN(je.postingDate) : ''}</TableCell>
+                  <TableCell className="text-xs" rowSpan={rowSpan}>
+                    {v?.voucherDate
+                      ? formatDateVN(v.voucherDate)
+                      : (je?.documentDate ? formatDateVN(je.documentDate) : (je?.postingDate ? formatDateVN(je.postingDate) : ''))}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs" rowSpan={rowSpan}>{v?.receiptNo ?? ''}</TableCell>
+                  <TableCell className="font-mono text-xs" rowSpan={rowSpan}>{v?.paymentNo ?? ''}</TableCell>
+                  <TableCell className="max-w-[180px] truncate text-xs" rowSpan={rowSpan}>
+                    {line.description || je?.description || ''}
+                    {v?.partyName ? <span className="block text-muted-foreground">{v.partyName}</span> : null}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs">
+                    {contras[0]?.code ?? ''}
+                    {contras[0]?.name ? <span className="text-muted-foreground"> — {contras[0].name}</span> : null}
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-xs">
+                    {contras.length > 1 ? fmtAmt(Number(contras[0]?.creditAmount ?? 0)) : fmtAmt(debit)}
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-xs">
+                    {contras.length > 1 ? fmtAmt(Number(contras[0]?.debitAmount ?? 0)) : fmtAmt(credit)}
+                  </TableCell>
+                  <TableCell className={`text-right font-mono text-xs font-medium ${isNeg ? 'text-red-600' : ''}`} rowSpan={rowSpan}>
+                    {isNeg && <AlertTriangle className="inline h-3 w-3 mr-1" />}
+                    {fmtBal(runBal)}
+                  </TableCell>
+                </TableRow>
+                {contras.slice(1).map((contra, idx) => (
+                  <TableRow key={`${line.id}-contra-${idx}`} className={isNeg ? 'bg-red-50 text-red-700' : ''}>
+                    <TableCell className="font-mono text-xs">
+                      {contra.code}
+                      {contra.name ? <span className="text-muted-foreground"> — {contra.name}</span> : null}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-xs">{fmtAmt(Number(contra.creditAmount ?? 0))}</TableCell>
+                    <TableCell className="text-right font-mono text-xs">{fmtAmt(Number(contra.debitAmount ?? 0))}</TableCell>
+                  </TableRow>
+                ))}
+              </Fragment>
             );
           })}
 

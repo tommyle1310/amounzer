@@ -847,9 +847,11 @@ export class AccountingBooksService {
       
       return {
         ...line,
-        contraAccounts: line.journalEntry.lines.map((l: { account: { code: string; name: string } }) => ({
+        contraAccounts: line.journalEntry.lines.map((l: { account: { code: string; name: string }; debitAmount: unknown; creditAmount: unknown }) => ({
           code: l.account.code,
           name: l.account.name,
+          debitAmount: l.debitAmount,
+          creditAmount: l.creditAmount,
         })),
         runningBalance,
         isNegativeBalance: runningBalance.lt(ZERO),
