@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useState, useMemo, Fragment } from 'react';
+import { useState, useMemo, Fragment, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { formatVND, formatDateVN } from '@amounzer/shared';
 import { apiClient } from '@/lib/api-client';
@@ -17,6 +17,8 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Download, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 
 // ── Raw API types ────────────────────────────────────────────────────────────
 
@@ -131,6 +133,46 @@ const bookApiMap: Record<string, string> = {
   'sales-journal': 'sales-journal',
 };
 
+// ── Resizable columns ────────────────────────────────────────────────────────
+
+function useResizableColumns(defaults: number[]) {
+  const [widths, setWidths] = useState<number[]>(() => [...defaults]);
+  const dragging = useRef<{ idx: number; startX: number; startW: number } | null>(null);
+
+  const startResize = (idx: number) => (e: React.MouseEvent) => {
+    e.preventDefault();
+    dragging.current = { idx, startX: e.clientX, startW: widths[idx] ?? defaults[idx] ?? 80 };
+
+    const onMove = (ev: MouseEvent) => {
+      if (!dragging.current) return;
+      const { idx: i, startX, startW } = dragging.current;
+      setWidths((prev) => {
+        const next = [...prev];
+        next[i] = Math.max(40, startW + ev.clientX - startX);
+        return next;
+      });
+    };
+    const onUp = () => {
+      dragging.current = null;
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
+
+  return { widths, startResize };
+}
+
+function RH({ onMouseDown }: { onMouseDown: (e: React.MouseEvent) => void }) {
+  return (
+    <div
+      className="absolute inset-y-0 right-0 w-1 cursor-col-resize select-none hover:bg-primary/50 z-10"
+      onMouseDown={onMouseDown}
+    />
+  );
+}
+
 // ── General Journal Table (S03a-DN) ──────────────────────────────────────────
 // Columns per TT200/TT99: STT | Ngày ghi sổ | Ngày CT | Số CT | Diễn giải | Đã ghi SC | TK | Nợ | Có
 // NO "Số dư" column — that belongs to Sổ Cái only
@@ -189,21 +231,23 @@ function GeneralJournalTable({
   const totalDebit = Number(totals?.totalDebit || 0);
   const totalCredit = Number(totals?.totalCredit || 0);
   const balanced = Math.abs(totalDebit - totalCredit) < 0.01;
+  const { widths: cw, startResize: sr } = useResizableColumns([48, 90, 90, 110, 220, 40, 96, 110, 110]);
 
   return (
     <div>
-      <Table>
+      <Table className="table-fixed">
+        <colgroup>{cw.map((w, i) => <col key={i} style={{ width: w }} />)}</colgroup>
         <TableHeader>
           <TableRow>
-            <TableHead className="w-12 text-center">STT</TableHead>
-            <TableHead>Ngày ghi sổ</TableHead>
-            <TableHead>Ngày CT</TableHead>
-            <TableHead>Số CT</TableHead>
-            <TableHead>Diễn giải</TableHead>
-            <TableHead className="w-10 text-center" title="Đã ghi Sổ Cái">✓SC</TableHead>
-            <TableHead className="w-24">Số hiệu TK</TableHead>
-            <TableHead className="text-right">Nợ (₫)</TableHead>
-            <TableHead className="text-right">Có (₫)</TableHead>
+            <TableHead className="relative text-center overflow-visible">STT<RH onMouseDown={sr(0)} /></TableHead>
+            <TableHead className="relative overflow-visible">Ngày ghi sổ<RH onMouseDown={sr(1)} /></TableHead>
+            <TableHead className="relative overflow-visible">Ngày CT<RH onMouseDown={sr(2)} /></TableHead>
+            <TableHead className="relative overflow-visible">Số CT<RH onMouseDown={sr(3)} /></TableHead>
+            <TableHead className="relative overflow-visible">Diễn giải<RH onMouseDown={sr(4)} /></TableHead>
+            <TableHead className="relative text-center overflow-visible" title="Đã ghi Sổ Cái">✓SC<RH onMouseDown={sr(5)} /></TableHead>
+            <TableHead className="relative overflow-visible">Số hiệu TK<RH onMouseDown={sr(6)} /></TableHead>
+            <TableHead className="relative text-right overflow-visible">Nợ (₫)<RH onMouseDown={sr(7)} /></TableHead>
+            <TableHead className="relative text-right overflow-visible">Có (₫)<RH onMouseDown={sr(8)} /></TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -285,6 +329,7 @@ function GeneralLedgerSection({
 
   const openingBal = Number(data?.openingBalance?.balance ?? 0);
   const closingBal = Number(data?.closingBalance?.balance ?? 0);
+  const { widths: lw, startResize: ls } = useResizableColumns([56, 90, 90, 110, 200, 80, 110, 110, 110]);
 
   return (
     <div className="space-y-3">
@@ -322,18 +367,19 @@ function GeneralLedgerSection({
               </span>
             </div>
           )}
-          <Table>
+          <Table className="table-fixed">
+            <colgroup>{lw.map((w, i) => <col key={i} style={{ width: w }} />)}</colgroup>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-14 text-center" title="STT dòng Nhật ký chung">STT NKC</TableHead>
-                <TableHead>Ngày ghi sổ</TableHead>
-                <TableHead>Ngày CT</TableHead>
-                <TableHead>Số CT</TableHead>
-                <TableHead>Diễn giải</TableHead>
-                <TableHead>TK đối ứng</TableHead>
-                <TableHead className="text-right">Nợ (₫)</TableHead>
-                <TableHead className="text-right">Có (₫)</TableHead>
-                <TableHead className="text-right">Số dư (₫)</TableHead>
+                <TableHead className="relative text-center overflow-visible" title="STT dòng Nhật ký chung">STT NKC<RH onMouseDown={ls(0)} /></TableHead>
+                <TableHead className="relative overflow-visible">Ngày ghi sổ<RH onMouseDown={ls(1)} /></TableHead>
+                <TableHead className="relative overflow-visible">Ngày CT<RH onMouseDown={ls(2)} /></TableHead>
+                <TableHead className="relative overflow-visible">Số CT<RH onMouseDown={ls(3)} /></TableHead>
+                <TableHead className="relative overflow-visible">Diễn giải<RH onMouseDown={ls(4)} /></TableHead>
+                <TableHead className="relative overflow-visible">TK đối ứng<RH onMouseDown={ls(5)} /></TableHead>
+                <TableHead className="relative text-right overflow-visible">Nợ (₫)<RH onMouseDown={ls(6)} /></TableHead>
+                <TableHead className="relative text-right overflow-visible">Có (₫)<RH onMouseDown={ls(7)} /></TableHead>
+                <TableHead className="relative text-right overflow-visible">Số dư (₫)<RH onMouseDown={ls(8)} /></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -400,14 +446,25 @@ function GeneralLedgerSection({
 }
 
 // ── Cash / Bank Book Table (S07a-DN) ─────────────────────────────────────────
-// Columns: Ngày ghi sổ | Ngày CT | Số PT | Số PC | Diễn giải | TK đối ứng | Thu | Chi | Tồn quỹ
+// Simplified: 10 cols — single row per line, comma-separated TK codes, hover tooltip with amounts
+// Details:    12 cols — multi-contra rows have per-contra breakdown + rowspanned total columns
 
-function CashBookTable({ data }: { data: ApiBookResponse }) {
+// simplified: Ngày ghi sổ | Ngày CT | Số PT | Số PC | Diễn giải | Đối tượng | TK đối ứng | Thu | Chi | Tồn quỹ
+const CASH_SIMPLE_W = [90, 90, 100, 100, 160, 120, 80, 100, 100, 110];
+// details:    same cols but Thu→4 cols (per+sum), Chi→4 cols  (total 12)
+const CASH_DETAIL_W = [90, 90, 100, 100, 160, 120, 80, 90, 90, 90, 90, 110];
+
+function CashBookTable({ data, isDetails }: { data: ApiBookResponse; isDetails: boolean }) {
   const lines = data.data as JournalEntryLine[];
-  if (!lines || lines.length === 0) return <EmptyState />;
-
   const openingBal = Number(data.openingBalance?.balance ?? 0);
   const hasNegative = lines.some((l) => l.isNegativeBalance || Number(l.runningBalance ?? 0) < 0);
+  const simpleResize = useResizableColumns(CASH_SIMPLE_W);
+  const detailResize = useResizableColumns(CASH_DETAIL_W);
+  const { widths: cw, startResize: sr } = isDetails ? detailResize : simpleResize;
+
+  if (!lines || lines.length === 0) {
+    return <EmptyState />;
+  }
 
   return (
     <div>
@@ -419,23 +476,36 @@ function CashBookTable({ data }: { data: ApiBookResponse }) {
           </span>
         </div>
       )}
-      <Table>
+      <Table className="table-fixed">
+        <colgroup>{cw.map((w, i) => <col key={i} style={{ width: w }} />)}</colgroup>
         <TableHeader>
           <TableRow>
-            <TableHead>Ngày ghi sổ</TableHead>
-            <TableHead>Ngày CT</TableHead>
-            <TableHead>Số PT</TableHead>
-            <TableHead>Số PC</TableHead>
-            <TableHead>Diễn giải</TableHead>
-            <TableHead>TK đối ứng</TableHead>
-            <TableHead className="text-right">Thu (₫)</TableHead>
-            <TableHead className="text-right">Chi (₫)</TableHead>
-            <TableHead className="text-right">Tồn quỹ (₫)</TableHead>
+            <TableHead className="relative overflow-visible">Ngày ghi sổ<RH onMouseDown={sr(0)} /></TableHead>
+            <TableHead className="relative overflow-visible">Ngày CT<RH onMouseDown={sr(1)} /></TableHead>
+            <TableHead className="relative overflow-visible">Số PT<RH onMouseDown={sr(2)} /></TableHead>
+            <TableHead className="relative overflow-visible">Số PC<RH onMouseDown={sr(3)} /></TableHead>
+            <TableHead className="relative overflow-visible">Diễn giải<RH onMouseDown={sr(4)} /></TableHead>
+            <TableHead className="relative overflow-visible">Đối tượng<RH onMouseDown={sr(5)} /></TableHead>
+            <TableHead className="relative overflow-visible">TK đối ứng<RH onMouseDown={sr(6)} /></TableHead>
+            {isDetails ? (
+              <>
+                <TableHead className="relative text-right overflow-visible">Thu (₫)<RH onMouseDown={sr(7)} /></TableHead>
+                <TableHead className="relative text-right text-muted-foreground overflow-visible">∑ Thu<RH onMouseDown={sr(8)} /></TableHead>
+                <TableHead className="relative text-right overflow-visible">Chi (₫)<RH onMouseDown={sr(9)} /></TableHead>
+                <TableHead className="relative text-right text-muted-foreground overflow-visible">∑ Chi<RH onMouseDown={sr(10)} /></TableHead>
+              </>
+            ) : (
+              <>
+                <TableHead className="relative text-right overflow-visible">Thu (₫)<RH onMouseDown={sr(7)} /></TableHead>
+                <TableHead className="relative text-right overflow-visible">Chi (₫)<RH onMouseDown={sr(8)} /></TableHead>
+              </>
+            )}
+            <TableHead className="relative text-right overflow-visible">Tồn quỹ (₫)<RH onMouseDown={sr(isDetails ? 11 : 9)} /></TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           <TableRow className="bg-muted/40 font-medium">
-            <TableCell colSpan={8} className="text-xs italic">Số dư đầu kỳ (TK 111)</TableCell>
+            <TableCell colSpan={isDetails ? 11 : 9} className="text-xs italic">Số dư đầu kỳ (TK 111)</TableCell>
             <TableCell className="text-right font-mono text-xs">{fmtBal(openingBal)}</TableCell>
           </TableRow>
 
@@ -447,32 +517,96 @@ function CashBookTable({ data }: { data: ApiBookResponse }) {
             const contras = line.contraAccounts ?? [];
             const je = line.journalEntry;
             const v = line.voucher;
-            const rowSpan = contras.length > 1 ? contras.length : 1;
+            const rowClass = isNeg ? 'bg-red-50 text-red-700' : '';
 
+            const dateGhiSo = je?.postingDate ? formatDateVN(je.postingDate) : '';
+            const dateCT = v?.voucherDate
+              ? formatDateVN(v.voucherDate)
+              : je?.documentDate ? formatDateVN(je.documentDate) : (je?.postingDate ? formatDateVN(je.postingDate) : '');
+            const soPT = v?.receiptNo ?? '';
+            const soPC = v?.paymentNo ?? '';
+            const dienGiai = line.description || je?.description || '';
+            const doiTuong = v?.partyName ?? '';
+            const tonQuyCell = (
+              <TableCell className={`text-right font-mono text-xs font-medium ${isNeg ? 'text-red-600' : ''}`}>
+                {isNeg && <AlertTriangle className="inline h-3 w-3 mr-1" />}
+                {fmtBal(runBal)}
+              </TableCell>
+            );
+
+            // ── Simplified mode ──────────────────────────────────────────────
+            if (!isDetails) {
+              const contraTooltip = contras.length > 0
+                ? contras.map((c) => {
+                    const amt = debit > 0 ? Number(c.creditAmount ?? 0) : Number(c.debitAmount ?? 0);
+                    return `${c.code}: ${formatVND(amt)}`;
+                  }).join('\n')
+                : '';
+              const contraDisplay = contras.map((c) => c.code).join(', ');
+              return (
+                <TableRow key={line.id} className={rowClass}>
+                  <TableCell className="text-xs">{dateGhiSo}</TableCell>
+                  <TableCell className="text-xs">{dateCT}</TableCell>
+                  <TableCell className="font-mono text-xs">{soPT}</TableCell>
+                  <TableCell className="font-mono text-xs">{soPC}</TableCell>
+                  <TableCell className="max-w-[160px] truncate text-xs">{dienGiai}</TableCell>
+                  <TableCell className="text-xs">{doiTuong}</TableCell>
+                  <TableCell className="font-mono text-xs" title={contraTooltip || undefined}>{contraDisplay}</TableCell>
+                  <TableCell className="text-right font-mono text-xs">{fmtAmt(debit)}</TableCell>
+                  <TableCell className="text-right font-mono text-xs">{fmtAmt(credit)}</TableCell>
+                  {tonQuyCell}
+                </TableRow>
+              );
+            }
+
+            // ── Details mode ─────────────────────────────────────────────────
+            const isMultiContra = contras.length > 1;
+
+            // Single contra: Thu/Chi each colspan=2, no split
+            if (!isMultiContra) {
+              return (
+                <TableRow key={line.id} className={rowClass}>
+                  <TableCell className="text-xs">{dateGhiSo}</TableCell>
+                  <TableCell className="text-xs">{dateCT}</TableCell>
+                  <TableCell className="font-mono text-xs">{soPT}</TableCell>
+                  <TableCell className="font-mono text-xs">{soPC}</TableCell>
+                  <TableCell className="max-w-[160px] truncate text-xs">{dienGiai}</TableCell>
+                  <TableCell className="text-xs">{doiTuong}</TableCell>
+                  <TableCell className="font-mono text-xs" title={contras[0]?.name || undefined}>
+                    {contras[0]?.code ?? ''}
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-xs" colSpan={2}>{fmtAmt(debit)}</TableCell>
+                  <TableCell className="text-right font-mono text-xs" colSpan={2}>{fmtAmt(credit)}</TableCell>
+                  {tonQuyCell}
+                </TableRow>
+              );
+            }
+
+            // Multi-contra: per-contra breakdown + rowspanned total columns
+            const rowSpan = contras.length;
             return (
               <Fragment key={line.id}>
-                <TableRow className={isNeg ? 'bg-red-50 text-red-700' : ''}>
-                  <TableCell className="text-xs" rowSpan={rowSpan}>{je?.postingDate ? formatDateVN(je.postingDate) : ''}</TableCell>
-                  <TableCell className="text-xs" rowSpan={rowSpan}>
-                    {v?.voucherDate
-                      ? formatDateVN(v.voucherDate)
-                      : (je?.documentDate ? formatDateVN(je.documentDate) : (je?.postingDate ? formatDateVN(je.postingDate) : ''))}
-                  </TableCell>
-                  <TableCell className="font-mono text-xs" rowSpan={rowSpan}>{v?.receiptNo ?? ''}</TableCell>
-                  <TableCell className="font-mono text-xs" rowSpan={rowSpan}>{v?.paymentNo ?? ''}</TableCell>
-                  <TableCell className="max-w-[180px] truncate text-xs" rowSpan={rowSpan}>
-                    {line.description || je?.description || ''}
-                    {v?.partyName ? <span className="block text-muted-foreground">{v.partyName}</span> : null}
-                  </TableCell>
-                  <TableCell className="font-mono text-xs">
+                <TableRow className={rowClass}>
+                  <TableCell className="text-xs" rowSpan={rowSpan}>{dateGhiSo}</TableCell>
+                  <TableCell className="text-xs" rowSpan={rowSpan}>{dateCT}</TableCell>
+                  <TableCell className="font-mono text-xs" rowSpan={rowSpan}>{soPT}</TableCell>
+                  <TableCell className="font-mono text-xs" rowSpan={rowSpan}>{soPC}</TableCell>
+                  <TableCell className="max-w-[160px] truncate text-xs" rowSpan={rowSpan}>{dienGiai}</TableCell>
+                  <TableCell className="text-xs" rowSpan={rowSpan}>{doiTuong}</TableCell>
+                  <TableCell className="font-mono text-xs" title={contras[0]?.name || undefined}>
                     {contras[0]?.code ?? ''}
-                    {contras[0]?.name ? <span className="text-muted-foreground"> — {contras[0].name}</span> : null}
                   </TableCell>
                   <TableCell className="text-right font-mono text-xs">
-                    {contras.length > 1 ? fmtAmt(Number(contras[0]?.creditAmount ?? 0)) : fmtAmt(debit)}
+                    {fmtAmt(Number(contras[0]?.creditAmount ?? 0))}
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-xs font-semibold border-l-2 bg-muted/20" rowSpan={rowSpan}>
+                    {fmtAmt(debit)}
                   </TableCell>
                   <TableCell className="text-right font-mono text-xs">
-                    {contras.length > 1 ? fmtAmt(Number(contras[0]?.debitAmount ?? 0)) : fmtAmt(credit)}
+                    {fmtAmt(Number(contras[0]?.debitAmount ?? 0))}
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-xs font-semibold border-l-2 bg-muted/20" rowSpan={rowSpan}>
+                    {fmtAmt(credit)}
                   </TableCell>
                   <TableCell className={`text-right font-mono text-xs font-medium ${isNeg ? 'text-red-600' : ''}`} rowSpan={rowSpan}>
                     {isNeg && <AlertTriangle className="inline h-3 w-3 mr-1" />}
@@ -480,13 +614,16 @@ function CashBookTable({ data }: { data: ApiBookResponse }) {
                   </TableCell>
                 </TableRow>
                 {contras.slice(1).map((contra, idx) => (
-                  <TableRow key={`${line.id}-contra-${idx}`} className={isNeg ? 'bg-red-50 text-red-700' : ''}>
-                    <TableCell className="font-mono text-xs">
+                  <TableRow key={`${line.id}-contra-${idx}`} className={rowClass}>
+                    <TableCell className="font-mono text-xs" title={contra.name || undefined}>
                       {contra.code}
-                      {contra.name ? <span className="text-muted-foreground"> — {contra.name}</span> : null}
                     </TableCell>
-                    <TableCell className="text-right font-mono text-xs">{fmtAmt(Number(contra.creditAmount ?? 0))}</TableCell>
-                    <TableCell className="text-right font-mono text-xs">{fmtAmt(Number(contra.debitAmount ?? 0))}</TableCell>
+                    <TableCell className="text-right font-mono text-xs">
+                      {fmtAmt(Number(contra.creditAmount ?? 0))}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-xs">
+                      {fmtAmt(Number(contra.debitAmount ?? 0))}
+                    </TableCell>
                   </TableRow>
                 ))}
               </Fragment>
@@ -494,9 +631,18 @@ function CashBookTable({ data }: { data: ApiBookResponse }) {
           })}
 
           <TableRow className="bg-muted/40 font-semibold border-t-2">
-            <TableCell colSpan={6} className="text-xs">Tổng cộng & Số dư cuối kỳ</TableCell>
-            <TableCell className="text-right font-mono text-xs">{fmtAmt(Number(data.totals?.totalDebit ?? 0))}</TableCell>
-            <TableCell className="text-right font-mono text-xs">{fmtAmt(Number(data.totals?.totalCredit ?? 0))}</TableCell>
+            <TableCell colSpan={7} className="text-xs">Tổng cộng & Số dư cuối kỳ</TableCell>
+            {isDetails ? (
+              <>
+                <TableCell className="text-right font-mono text-xs" colSpan={2}>{fmtAmt(Number(data.totals?.totalDebit ?? 0))}</TableCell>
+                <TableCell className="text-right font-mono text-xs" colSpan={2}>{fmtAmt(Number(data.totals?.totalCredit ?? 0))}</TableCell>
+              </>
+            ) : (
+              <>
+                <TableCell className="text-right font-mono text-xs">{fmtAmt(Number(data.totals?.totalDebit ?? 0))}</TableCell>
+                <TableCell className="text-right font-mono text-xs">{fmtAmt(Number(data.totals?.totalCredit ?? 0))}</TableCell>
+              </>
+            )}
             <TableCell className="text-right font-mono text-xs font-bold">
               {fmtBal(Number(data.closingBalance?.balance ?? 0))}
             </TableCell>
@@ -525,22 +671,25 @@ function CashBookTable({ data }: { data: ApiBookResponse }) {
 
 function GenericLedgerTable({ data }: { data: ApiBookResponse }) {
   const lines = data.data as JournalEntryLine[];
+  const { widths: gw, startResize: gs } = useResizableColumns([90, 100, 200, 80, 120, 100, 100, 110]);
+
   if (!lines || lines.length === 0) return <EmptyState />;
 
   const openingBal = Number(data.openingBalance?.balance ?? 0);
 
   return (
-    <Table>
+    <Table className="table-fixed">
+      <colgroup>{gw.map((w, i) => <col key={i} style={{ width: w }} />)}</colgroup>
       <TableHeader>
         <TableRow>
-          <TableHead>Ngày</TableHead>
-          <TableHead>Số CT</TableHead>
-          <TableHead>Diễn giải</TableHead>
-          <TableHead>TK đối ứng</TableHead>
-          <TableHead>Đối tượng</TableHead>
-          <TableHead className="text-right">Nợ (₫)</TableHead>
-          <TableHead className="text-right">Có (₫)</TableHead>
-          <TableHead className="text-right">Số dư (₫)</TableHead>
+          <TableHead className="relative overflow-visible">Ngày<RH onMouseDown={gs(0)} /></TableHead>
+          <TableHead className="relative overflow-visible">Số CT<RH onMouseDown={gs(1)} /></TableHead>
+          <TableHead className="relative overflow-visible">Diễn giải<RH onMouseDown={gs(2)} /></TableHead>
+          <TableHead className="relative overflow-visible">TK đối ứng<RH onMouseDown={gs(3)} /></TableHead>
+          <TableHead className="relative overflow-visible">Đối tượng<RH onMouseDown={gs(4)} /></TableHead>
+          <TableHead className="relative text-right overflow-visible">Nợ (₫)<RH onMouseDown={gs(5)} /></TableHead>
+          <TableHead className="relative text-right overflow-visible">Có (₫)<RH onMouseDown={gs(6)} /></TableHead>
+          <TableHead className="relative text-right overflow-visible">Số dư (₫)<RH onMouseDown={gs(7)} /></TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -594,10 +743,12 @@ function BookTab({
   bookKey,
   dateFrom,
   dateTo,
+  cashIsDetails,
 }: {
   bookKey: string;
   dateFrom: string;
   dateTo: string;
+  cashIsDetails: boolean;
 }) {
   if (bookKey === 'general-ledger') {
     return <GeneralLedgerSection dateFrom={dateFrom} dateTo={dateTo} />;
@@ -621,7 +772,7 @@ function BookTab({
   }
 
   if (bookKey === 'cash' || bookKey === 'bank') {
-    return <CashBookTable data={data} />;
+    return <CashBookTable data={data} isDetails={cashIsDetails} />;
   }
 
   return <GenericLedgerTable data={data} />;
@@ -634,6 +785,7 @@ export default function BooksPage() {
   const defaultDates = getDefaultDateRange();
   const [dateFrom, setDateFrom] = useState<string>(defaultDates.startDate);
   const [dateTo, setDateTo] = useState<string>(defaultDates.endDate);
+  const [cashIsDetails, setCashIsDetails] = useState(true);
 
   function handleExport(format: 'excel' | 'pdf') {
     const params = new URLSearchParams({ format });
@@ -697,11 +849,23 @@ export default function BooksPage() {
         {bookTypes.map((bt) => (
           <TabsContent key={bt.key} value={bt.key}>
             <Card>
-              <CardHeader>
+              <CardHeader className="flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm">{bt.label}</CardTitle>
+                {(bt.key === 'cash' || bt.key === 'bank') && (
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor="cash-view-toggle" className="text-xs text-muted-foreground cursor-pointer">
+                      {cashIsDetails ? 'Chi tiết' : 'Tóm tắt'}
+                    </Label>
+                    <Switch
+                      id="cash-view-toggle"
+                      checked={cashIsDetails}
+                      onCheckedChange={setCashIsDetails}
+                    />
+                  </div>
+                )}
               </CardHeader>
               <CardContent className="p-0">
-                <BookTab bookKey={bt.key} dateFrom={dateFrom} dateTo={dateTo} />
+                <BookTab bookKey={bt.key} dateFrom={dateFrom} dateTo={dateTo} cashIsDetails={cashIsDetails} />
               </CardContent>
             </Card>
           </TabsContent>
