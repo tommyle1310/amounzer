@@ -1,0 +1,772 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// AUTH & RBAC
+// ============================================================================
+
+enum Role {
+  ADMIN
+  ACCOUNTANT
+  MANAGER
+  VIEWER
+}
+
+model User {
+  id                String    @id @default(cuid())
+  email             String    @unique
+  name              String
+  passwordHash      String
+  twoFactorSecret   String?
+  twoFactorEnabled  Boolean   @default(false)
+  isActive          Boolean   @default(true)
+  lastLoginAt       DateTime?
+  failedLoginCount  Int       @default(0)
+  lockedUntil       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  companyUsers CompanyUser[]
+  sessions     Session[]
+  auditLogs    AuditLog[]
+
+  @@map("users")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  userId       String
+  refreshToken String   @unique
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model CompanyUser {
+  id        String   @id @default(cuid())
+  userId    String
+  companyId String
+  role      Role
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, companyId])
+  @@index([companyId])
+  @@map("company_users")
+}
+
+// ============================================================================
+// MULTI-TENANT FOUNDATION
+// ============================================================================
+
+enum AccountingStandard {
+  TT200
+  TT133
+}
+
+enum FiscalYearStatus {
+  OPEN
+  CLOSED
+}
+
+enum FiscalPeriodStatus {
+  OPEN
+  LOCKED
+}
+
+model Company {
+  id                 String             @id @default(cuid())
+  name               String
+  taxCode            String?
+  address            String?
+  legalRepresentative String?
+  phone              String?
+  accountingStandard AccountingStandard @default(TT200)
+  baseCurrency       String             @default("VND")
+  locale             String             @default("vi")
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  companyUsers       CompanyUser[]
+  fiscalYears        FiscalYear[]
+  ledgerAccounts     LedgerAccount[]
+  journalEntries     JournalEntry[]
+  vouchers           Voucher[]
+  customers          Customer[]
+  vendors            Vendor[]
+  inventoryItems     InventoryItem[]
+  warehouses         Warehouse[]
+  fixedAssets        FixedAsset[]
+  employees          Employee[]
+  vatRecords         VatRecord[]
+  badDebtProvisions  BadDebtProvision[]
+  customFieldDefs    CustomFieldDefinition[]
+  reportTemplates    DynamicReportTemplate[]
+  auditLogs          AuditLog[]
+
+  @@map("companies")
+}
+
+model FiscalYear {
+  id        String           @id @default(cuid())
+  companyId String
+  name      String
+  startDate DateTime
+  endDate   DateTime
+  status    FiscalYearStatus @default(OPEN)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  company Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  periods FiscalPeriod[]
+  journalEntries JournalEntry[]
+
+  @@index([companyId])
+  @@map("fiscal_years")
+}
+
+model FiscalPeriod {
+  id           String             @id @default(cuid())
+  fiscalYearId String
+  name         String
+  startDate    DateTime
+  endDate      DateTime
+  periodNumber Int
+  status       FiscalPeriodStatus @default(OPEN)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  fiscalYear FiscalYear @relation(fields: [fiscalYearId], references: [id], onDelete: Cascade)
+
+  @@index([fiscalYearId])
+  @@map("fiscal_periods")
+}
+
+// ============================================================================
+// CHART OF ACCOUNTS
+// ============================================================================
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+  OFF_BALANCE_SHEET
+}
+
+enum NormalBalance {
+  DEBIT
+  CREDIT
+}
+
+model LedgerAccount {
+  id            String        @id @default(cuid())
+  companyId     String
+  code          String
+  name          String
+  nameEn        String?
+  accountType   AccountType
+  normalBalance NormalBalance
+  parentId      String?
+  level         Int           @default(1)
+  isActive      Boolean       @default(true)
+  isSystem      Boolean       @default(false)
+  description   String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  company  Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  parent   LedgerAccount? @relation("AccountHierarchy", fields: [parentId], references: [id])
+  children LedgerAccount[] @relation("AccountHierarchy")
+
+  journalLines JournalEntryLine[]
+
+  @@unique([companyId, code])
+  @@index([companyId, accountType])
+  @@index([companyId, parentId])
+  @@map("ledger_accounts")
+}
+
+// ============================================================================
+// DOUBLE-ENTRY ENGINE
+// ============================================================================
+
+enum JournalEntryStatus {
+  DRAFT
+  POSTED
+  REVERSAL
+}
+
+enum JournalEntryType {
+  STANDARD
+  ADJUSTMENT
+  CLOSING
+  REVERSAL
+  OPENING
+}
+
+model JournalEntry {
+  id              String             @id @default(cuid())
+  companyId       String
+  fiscalYearId    String
+  entryNumber     String
+  postingDate     DateTime
+  description     String
+  status          JournalEntryStatus @default(DRAFT)
+  entryType       JournalEntryType   @default(STANDARD)
+  totalDebit      Decimal            @db.Decimal(18, 0)
+  totalCredit     Decimal            @db.Decimal(18, 0)
+  reversalOfId    String?
+  correctedById   String?
+  postedAt        DateTime?
+  postedById      String?
+  createdById     String?
+  customFieldValues Json?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  company    Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  fiscalYear FiscalYear @relation(fields: [fiscalYearId], references: [id])
+  reversalOf JournalEntry?  @relation("JournalReversal", fields: [reversalOfId], references: [id])
+  reversals  JournalEntry[] @relation("JournalReversal")
+
+  lines                JournalEntryLine[]
+  accountingTransaction AccountingTransaction?
+
+  @@unique([companyId, entryNumber])
+  @@index([companyId, fiscalYearId, status])
+  @@index([companyId, postingDate])
+  @@map("journal_entries")
+}
+
+model JournalEntryLine {
+  id             String  @id @default(cuid())
+  journalEntryId String
+  accountId      String
+  description    String?
+  debitAmount    Decimal @default(0) @db.Decimal(18, 0)
+  creditAmount   Decimal @default(0) @db.Decimal(18, 0)
+  lineOrder      Int
+  customerId     String?
+  vendorId       String?
+  inventoryItemId String?
+  employeeId     String?
+
+  journalEntry JournalEntry  @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  account      LedgerAccount @relation(fields: [accountId], references: [id])
+
+  customer      Customer?      @relation(fields: [customerId], references: [id])
+  vendor        Vendor?        @relation(fields: [vendorId], references: [id])
+  inventoryItem InventoryItem? @relation(fields: [inventoryItemId], references: [id])
+  employee      Employee?      @relation(fields: [employeeId], references: [id])
+
+  @@index([journalEntryId])
+  @@index([accountId])
+  @@map("journal_entry_lines")
+}
+
+model AccountingTransaction {
+  id             String @id @default(cuid())
+  journalEntryId String @unique
+  sourceType     String // 'voucher', 'payroll', 'depreciation', 'inventory', 'vat', 'closing'
+  sourceId       String
+  description    String?
+  createdAt      DateTime @default(now())
+
+  journalEntry JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+
+  @@index([sourceType, sourceId])
+  @@map("accounting_transactions")
+}
+
+// ============================================================================
+// AUDIT TRAIL
+// ============================================================================
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  companyId   String
+  userId      String?
+  action      String   // CREATE, UPDATE, DELETE, POST, VOID, LOCK, UNLOCK, CLOSE
+  entityType  String
+  entityId    String
+  beforeData  Json?
+  afterData   Json?
+  metadata    Json?
+  ipAddress   String?
+  createdAt   DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user    User?   @relation(fields: [userId], references: [id])
+
+  @@index([companyId, entityType, entityId])
+  @@index([companyId, userId])
+  @@index([companyId, createdAt])
+  @@map("audit_logs")
+}
+
+// ============================================================================
+// CUSTOM FIELDS
+// ============================================================================
+
+enum CustomFieldType {
+  TEXT
+  NUMBER
+  DATE
+  SELECT
+  CHECKBOX
+  MULTI_SELECT
+}
+
+model CustomFieldDefinition {
+  id          String          @id @default(cuid())
+  companyId   String
+  entityType  String          // 'voucher', 'customer', 'vendor', 'fixedAsset', 'inventoryItem', 'journalEntry', 'payrollRecord'
+  fieldName   String
+  fieldLabel  String
+  fieldType   CustomFieldType
+  options     Json?           // For SELECT/MULTI_SELECT: ["option1", "option2"]
+  validation  Json?           // { min, max, required, pattern }
+  sortOrder   Int             @default(0)
+  isActive    Boolean         @default(true)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, entityType, fieldName])
+  @@index([companyId, entityType])
+  @@map("custom_field_definitions")
+}
+
+// ============================================================================
+// VOUCHER MANAGEMENT
+// ============================================================================
+
+enum VoucherType {
+  PT    // Phiếu thu - Cash Receipt
+  PC    // Phiếu chi - Cash Payment
+  BDN   // Bank Debit Note - Giấy báo nợ
+  BCN   // Bank Credit Note - Giấy báo có
+  BT    // Bank Transfer
+}
+
+enum VoucherStatus {
+  DRAFT
+  POSTED
+  VOIDED
+}
+
+model Voucher {
+  id               String        @id @default(cuid())
+  companyId        String
+  voucherType      VoucherType
+  voucherNumber    String
+  date             DateTime
+  counterpartyName String?
+  counterpartyId   String?       // customerId or vendorId
+  counterpartyType String?       // 'customer' or 'vendor'
+  description      String
+  totalAmount      Decimal       @db.Decimal(18, 0)
+  status           VoucherStatus @default(DRAFT)
+  journalEntryId   String?
+  reversalVoucherId String?
+  postedAt         DateTime?
+  postedById       String?
+  customFieldValues Json?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, voucherType, voucherNumber])
+  @@index([companyId, date])
+  @@index([companyId, voucherType, status])
+  @@map("vouchers")
+}
+
+// ============================================================================
+// AR/AP
+// ============================================================================
+
+model Customer {
+  id               String  @id @default(cuid())
+  companyId        String
+  code             String
+  name             String
+  taxCode          String?
+  address          String?
+  phone            String?
+  email            String?
+  contactPerson    String?
+  bankAccount      String?
+  bankName         String?
+  isActive         Boolean @default(true)
+  customFieldValues Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  company         Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  journalLines    JournalEntryLine[]
+  vatRecords      VatRecord[]
+  badDebtProvisions BadDebtProvision[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
+  @@map("customers")
+}
+
+model Vendor {
+  id               String  @id @default(cuid())
+  companyId        String
+  code             String
+  name             String
+  taxCode          String?
+  address          String?
+  phone            String?
+  email            String?
+  contactPerson    String?
+  bankAccount      String?
+  bankName         String?
+  isActive         Boolean @default(true)
+  customFieldValues Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  company      Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  journalLines JournalEntryLine[]
+  vatRecords   VatRecord[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
+  @@map("vendors")
+}
+
+// ============================================================================
+// INVENTORY
+// ============================================================================
+
+enum ValuationMethod {
+  WEIGHTED_AVERAGE
+  FIFO
+  SPECIFIC
+}
+
+model Warehouse {
+  id        String   @id @default(cuid())
+  companyId String
+  code      String
+  name      String
+  address   String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company    Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  movements  InventoryMovement[]
+
+  @@unique([companyId, code])
+  @@map("warehouses")
+}
+
+model InventoryItem {
+  id               String          @id @default(cuid())
+  companyId        String
+  code             String
+  name             String
+  unit             String
+  accountCode      String          @default("152") // TK 152, 153, 155, 156
+  valuationMethod  ValuationMethod @default(WEIGHTED_AVERAGE)
+  currentQty       Decimal         @default(0) @db.Decimal(18, 4)
+  currentValue     Decimal         @default(0) @db.Decimal(18, 0)
+  avgUnitCost      Decimal         @default(0) @db.Decimal(18, 4)
+  isActive         Boolean         @default(true)
+  customFieldValues Json?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  company      Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  movements    InventoryMovement[]
+  journalLines JournalEntryLine[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
+  @@map("inventory_items")
+}
+
+enum MovementType {
+  RECEIPT
+  ISSUE
+  TRANSFER_IN
+  TRANSFER_OUT
+  ADJUSTMENT
+}
+
+model InventoryMovement {
+  id              String       @id @default(cuid())
+  companyId       String
+  inventoryItemId String
+  warehouseId     String
+  movementType    MovementType
+  date            DateTime
+  quantity        Decimal      @db.Decimal(18, 4)
+  unitCost        Decimal      @db.Decimal(18, 4)
+  totalCost       Decimal      @db.Decimal(18, 0)
+  reference       String?
+  description     String?
+  journalEntryId  String?
+  createdAt       DateTime     @default(now())
+
+  inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id])
+  warehouse     Warehouse     @relation(fields: [warehouseId], references: [id])
+
+  @@index([companyId, inventoryItemId, date])
+  @@map("inventory_movements")
+}
+
+// ============================================================================
+// FIXED ASSETS
+// ============================================================================
+
+enum DepreciationMethod {
+  STRAIGHT_LINE
+  DECLINING_BALANCE
+}
+
+enum AssetStatus {
+  ACTIVE
+  FULLY_DEPRECIATED
+  DISPOSED
+}
+
+model FixedAsset {
+  id                   String             @id @default(cuid())
+  companyId            String
+  code                 String
+  name                 String
+  category             String
+  acquisitionDate      DateTime
+  acquisitionCost      Decimal            @db.Decimal(18, 0)
+  usefulLifeMonths     Int
+  depreciationMethod   DepreciationMethod @default(STRAIGHT_LINE)
+  residualValue        Decimal            @default(0) @db.Decimal(18, 0)
+  accumulatedDepr      Decimal            @default(0) @db.Decimal(18, 0)
+  netBookValue         Decimal            @db.Decimal(18, 0)
+  monthlyDeprAmount    Decimal            @db.Decimal(18, 0)
+  departmentAccount    String             @default("627") // TK 627, 641, 642
+  status               AssetStatus        @default(ACTIVE)
+  disposalDate         DateTime?
+  disposalProceeds     Decimal?           @db.Decimal(18, 0)
+  disposalGainLoss     Decimal?           @db.Decimal(18, 0)
+  customFieldValues    Json?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  company              Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  depreciationSchedules DepreciationSchedule[]
+
+  @@unique([companyId, code])
+  @@index([companyId, status])
+  @@map("fixed_assets")
+}
+
+model DepreciationSchedule {
+  id             String   @id @default(cuid())
+  fixedAssetId   String
+  periodDate     DateTime
+  amount         Decimal  @db.Decimal(18, 0)
+  accumulated    Decimal  @db.Decimal(18, 0)
+  netBookValue   Decimal  @db.Decimal(18, 0)
+  journalEntryId String?
+  isPosted       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  fixedAsset FixedAsset @relation(fields: [fixedAssetId], references: [id], onDelete: Cascade)
+
+  @@index([fixedAssetId, periodDate])
+  @@map("depreciation_schedules")
+}
+
+// ============================================================================
+// PAYROLL
+// ============================================================================
+
+enum PayrollStatus {
+  DRAFT
+  COMPUTED
+  POSTED
+}
+
+model Employee {
+  id               String   @id @default(cuid())
+  companyId        String
+  code             String
+  name             String
+  department       String?
+  position         String?
+  baseSalary       Decimal  @db.Decimal(18, 0)
+  socialInsuranceSalary Decimal @db.Decimal(18, 0)
+  bankAccount      String?
+  bankName         String?
+  taxCode          String?
+  isActive         Boolean  @default(true)
+  customFieldValues Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  company       Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  salarySlips   SalarySlip[]
+  journalLines  JournalEntryLine[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
+  @@map("employees")
+}
+
+model PayrollRecord {
+  id            String        @id @default(cuid())
+  companyId     String
+  periodMonth   Int
+  periodYear    Int
+  name          String
+  status        PayrollStatus @default(DRAFT)
+  totalGross    Decimal       @default(0) @db.Decimal(18, 0)
+  totalNet      Decimal       @default(0) @db.Decimal(18, 0)
+  totalDeductions Decimal     @default(0) @db.Decimal(18, 0)
+  totalPit      Decimal       @default(0) @db.Decimal(18, 0)
+  journalEntryId String?
+  postedAt      DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  salarySlips SalarySlip[]
+
+  @@unique([companyId, periodMonth, periodYear])
+  @@index([companyId])
+  @@map("payroll_records")
+}
+
+model SalarySlip {
+  id              String  @id @default(cuid())
+  payrollRecordId String
+  employeeId      String
+  baseSalary      Decimal @db.Decimal(18, 0)
+  allowances      Decimal @default(0) @db.Decimal(18, 0)
+  overtime        Decimal @default(0) @db.Decimal(18, 0)
+  grossSalary     Decimal @db.Decimal(18, 0)
+  bhxh            Decimal @default(0) @db.Decimal(18, 0) // Social insurance (8%)
+  bhyt            Decimal @default(0) @db.Decimal(18, 0) // Health insurance (1.5%)
+  bhtn            Decimal @default(0) @db.Decimal(18, 0) // Unemployment insurance (1%)
+  personalIncomeTax Decimal @default(0) @db.Decimal(18, 0)
+  otherDeductions Decimal @default(0) @db.Decimal(18, 0)
+  netSalary       Decimal @db.Decimal(18, 0)
+  createdAt       DateTime @default(now())
+
+  payrollRecord PayrollRecord @relation(fields: [payrollRecordId], references: [id], onDelete: Cascade)
+  employee      Employee      @relation(fields: [employeeId], references: [id])
+
+  @@unique([payrollRecordId, employeeId])
+  @@map("salary_slips")
+}
+
+// ============================================================================
+// VAT & TAX
+// ============================================================================
+
+enum VatDirection {
+  INPUT
+  OUTPUT
+}
+
+model VatRecord {
+  id             String       @id @default(cuid())
+  companyId      String
+  direction      VatDirection
+  invoiceNumber  String
+  invoiceDate    DateTime
+  customerId     String?
+  vendorId       String?
+  taxableAmount  Decimal      @db.Decimal(18, 0)
+  vatRate        Decimal      @db.Decimal(5, 2) // e.g., 10.00, 5.00, 8.00, 0.00
+  vatAmount      Decimal      @db.Decimal(18, 0)
+  description    String?
+  journalEntryId String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  customer Customer? @relation(fields: [customerId], references: [id])
+  vendor   Vendor?   @relation(fields: [vendorId], references: [id])
+
+  @@index([companyId, direction, invoiceDate])
+  @@map("vat_records")
+}
+
+// ============================================================================
+// BAD DEBT PROVISION
+// ============================================================================
+
+enum BadDebtStatus {
+  PROVISIONED
+  REVERSED
+  WRITTEN_OFF
+}
+
+model BadDebtProvision {
+  id               String        @id @default(cuid())
+  companyId        String
+  customerId       String
+  amount           Decimal       @db.Decimal(18, 0)
+  reason           String
+  status           BadDebtStatus @default(PROVISIONED)
+  provisionDate    DateTime
+  reversalDate     DateTime?
+  writeOffDate     DateTime?
+  journalEntryId   String?
+  reversalEntryId  String?
+  writeOffEntryId  String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  company  Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id])
+
+  @@index([companyId, status])
+  @@map("bad_debt_provisions")
+}
+
+// ============================================================================
+// DYNAMIC REPORTING
+// ============================================================================
+
+model DynamicReportTemplate {
+  id          String   @id @default(cuid())
+  companyId   String
+  name        String
+  description String?
+  config      Json     // { dimensions, measures, filters, sorting, visualization }
+  createdById String?
+  isShared    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@map("dynamic_report_templates")
+}
