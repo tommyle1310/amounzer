@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Query,
+  Param,
   UseGuards,
   Request,
 } from '@nestjs/common';
@@ -138,6 +139,69 @@ export class FinancialReportsController {
     @Query('endDate') endDate: string,
   ) {
     return this.financialReportsService.getCashFlowAnalysis(req.companyId, startDate, endDate);
+  }
+
+  // ── TT99/2025 Compliance Reports ──
+
+  /**
+   * S06-DN: Trial Balance (Bảng cân đối số phát sinh)
+   * Shows opening balance, period movements, and closing balance
+   */
+  @Get('trial-balance')
+  @Roles('ADMIN', 'ACCOUNTANT', 'MANAGER', 'VIEWER')
+  async getTrialBalance(
+    @Request() req: { companyId: string },
+    @Query('startDate') startDate: string,
+    @Query('endDate') endDate: string,
+    @Query('showTree') showTree?: string,
+    @Query('accountLevel') accountLevel?: string,
+    @Query('showZeroBalance') showZeroBalance?: string,
+  ) {
+    return this.financialReportsService.getTrialBalance(
+      req.companyId,
+      startDate,
+      endDate,
+      {
+        showTree: showTree !== 'false',
+        accountLevel: accountLevel ? parseInt(accountLevel, 10) : undefined,
+        showZeroBalance: showZeroBalance === 'true',
+      },
+    );
+  }
+
+  /**
+   * Partner Ledger - detailed transaction history for a customer or vendor
+   * Used for B09-DN Notes disclosure requirements
+   */
+  @Get('partner-ledger/:partnerId')
+  @Roles('ADMIN', 'ACCOUNTANT', 'MANAGER', 'VIEWER')
+  async getPartnerLedger(
+    @Request() req: { companyId: string },
+    @Param('partnerId') partnerId: string,
+    @Query('type') partnerType: 'customer' | 'vendor',
+    @Query('startDate') startDate: string,
+    @Query('endDate') endDate: string,
+  ) {
+    return this.financialReportsService.getPartnerLedger(
+      req.companyId,
+      partnerId,
+      partnerType || 'customer',
+      startDate,
+      endDate,
+    );
+  }
+
+  /**
+   * Bank Account Detail - required for Notes disclosure when balance >= 10%
+   * TK 112 (Tiền gửi không kỳ hạn) breakdown by bank
+   */
+  @Get('bank-detail')
+  @Roles('ADMIN', 'ACCOUNTANT', 'MANAGER', 'VIEWER')
+  async getBankAccountDetail(
+    @Request() req: { companyId: string },
+    @Query('asOfDate') asOfDate: string,
+  ) {
+    return this.financialReportsService.getBankAccountDetail(req.companyId, asOfDate);
   }
 
   // ── Debug endpoint ──

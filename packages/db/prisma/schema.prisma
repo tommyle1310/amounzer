@@ -76,6 +76,7 @@ model CompanyUser {
 enum AccountingStandard {
   TT200
   TT133
+  TT99   // Thông tư 99/2025/TT-BTC - effective from 2026
 }
 
 enum FiscalYearStatus {
@@ -175,26 +176,29 @@ enum NormalBalance {
 }
 
 model LedgerAccount {
-  id            String        @id @default(cuid())
-  companyId     String
-  code          String
-  name          String
-  nameEn        String?
-  accountType   AccountType
-  normalBalance NormalBalance
-  parentId      String?
-  level         Int           @default(1)
-  isActive      Boolean       @default(true)
-  isSystem      Boolean       @default(false)
-  description   String?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  id                  String        @id @default(cuid())
+  companyId           String
+  code                String        @db.VarChar(50)  // Extended for alphanumeric sub-accounts (e.g., 131-A, 1311)
+  name                String
+  nameEn              String?
+  accountType         AccountType
+  normalBalance       NormalBalance
+  parentId            String?
+  level               Int           @default(1)
+  isActive            Boolean       @default(true)
+  isSystem            Boolean       @default(false)
+  isSpecialReciprocal Boolean       @default(false)  // Flag for 112, 131, 331 per TT99
+  reportIndicatorCode String?       // Maps to financial report line codes (e.g., "131" for AR, "312" for advances received)
+  description         String?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
 
   company  Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
   parent   LedgerAccount? @relation("AccountHierarchy", fields: [parentId], references: [id])
   children LedgerAccount[] @relation("AccountHierarchy")
 
-  journalLines JournalEntryLine[]
+  journalLines     JournalEntryLine[]
+  partnerAccounts  PartnerAccount[]
 
   @@unique([companyId, code])
   @@index([companyId, accountType])
@@ -267,6 +271,15 @@ model JournalEntryLine {
   vendorId       String?
   inventoryItemId String?
   employeeId     String?
+  
+  // Foreign currency support (TT99 compliance for TK 1122)
+  originalCurrency    String?   @db.VarChar(3)  // USD, EUR, etc.
+  originalDebitAmount Decimal?  @db.Decimal(18, 2)
+  originalCreditAmount Decimal? @db.Decimal(18, 2)
+  exchangeRate        Decimal?  @db.Decimal(18, 6)
+  
+  // Cash flow classification for B03-DN (TT99)
+  cashFlowCode  String?  // Operating: '01'-'07', Investing: '21'-'27', Financing: '31'-'36'
 
   journalEntry JournalEntry  @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
   account      LedgerAccount @relation(fields: [accountId], references: [id])
@@ -278,6 +291,8 @@ model JournalEntryLine {
 
   @@index([journalEntryId])
   @@index([accountId])
+  @@index([customerId])
+  @@index([vendorId])
   @@map("journal_entry_lines")
 }
 
@@ -365,6 +380,7 @@ enum VoucherType {
   BDN   // Bank Debit Note - Giấy báo nợ
   BCN   // Bank Credit Note - Giấy báo có
   BT    // Bank Transfer
+  CTGS  // Chứng từ ghi sổ - Journal Voucher
 }
 
 enum VoucherStatus {
@@ -426,18 +442,54 @@ model Voucher {
 // AR/AP
 // ============================================================================
 
+// Partner-Account linking table for automatic sub-account generation
+// Links customers/vendors to their corresponding sub-accounts (e.g., 131-CTYA for customer CTYA)
+model PartnerAccount {
+  id        String   @id @default(cuid())
+  accountId String
+  partnerId String   // Can be customerId or vendorId
+  partnerType String  // 'customer' or 'vendor'
+  createdAt DateTime @default(now())
+
+  account LedgerAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, partnerId])
+  @@index([partnerId, partnerType])
+  @@map("partner_accounts")
+}
+
+// Exchange rates table for FX processing (TK 1122, 413)
+model ExchangeRate {
+  id           String   @id @default(cuid())
+  companyId    String
+  currencyCode String   @db.VarChar(3)  // USD, EUR, etc.
+  date         DateTime
+  buyRate      Decimal  @db.Decimal(18, 6)
+  sellRate     Decimal  @db.Decimal(18, 6)
+  midRate      Decimal  @db.Decimal(18, 6)
+  source       String?  // 'vcb', 'manual', etc.
+  createdAt    DateTime @default(now())
+
+  @@unique([companyId, currencyCode, date])
+  @@index([companyId, currencyCode])
+  @@map("exchange_rates")
+}
+
 model Customer {
   id               String  @id @default(cuid())
   companyId        String
-  code             String
+  code             String   // Sub-account code (tiểu khoản)
   name             String
   taxCode          String?
   address          String?
-  phone            String?
+  phone            String?  // Company phone
   email            String?
-  contactPerson    String?
+  contactPerson    String?  // Contact person name
+  contactPhone     String?  // Contact person phone (số điện thoại người liên lạc)
   bankAccount      String?
   bankName         String?
+  region           String?   // Geographic region for segment reporting (TT99 Notes)
+  industryGroup    String?   // Industry classification for segment reporting
   isActive         Boolean @default(true)
   customFieldValues Json?
   createdAt        DateTime @default(now())
@@ -456,15 +508,18 @@ model Customer {
 model Vendor {
   id               String  @id @default(cuid())
   companyId        String
-  code             String
+  code             String   // Sub-account code (tiểu khoản)
   name             String
   taxCode          String?
   address          String?
-  phone            String?
+  phone            String?  // Company phone
   email            String?
-  contactPerson    String?
+  contactPerson    String?  // Contact person name
+  contactPhone     String?  // Contact person phone (số điện thoại người liên lạc)
   bankAccount      String?
   bankName         String?
+  region           String?   // Geographic region for segment reporting (TT99 Notes)
+  industryGroup    String?   // Industry classification for segment reporting
   isActive         Boolean @default(true)
   customFieldValues Json?
   createdAt        DateTime @default(now())
@@ -791,4 +846,41 @@ model DynamicReportTemplate {
 
   @@index([companyId])
   @@map("dynamic_report_templates")
+}
+
+// ============================================================================
+// FINANCIAL REPORT DEFINITIONS (TT99/2025 Compliance)
+// ============================================================================
+
+// Report types per Circular 99/2025/TT-BTC
+enum FinancialReportType {
+  B01_DN    // Báo cáo tình hình tài chính (Balance Sheet / Financial Position)
+  B02_DN    // Báo cáo kết quả hoạt động kinh doanh (Income Statement)
+  B03_DN    // Báo cáo lưu chuyển tiền tệ (Cash Flow Statement)
+  B09_DN    // Bản thuyết minh báo cáo tài chính (Notes to Financial Statements)
+  S06_DN    // Bảng cân đối số phát sinh (Trial Balance)
+}
+
+// Defines how accounts map to financial report line items
+model FinancialReportDefinition {
+  id                String              @id @default(cuid())
+  standard          AccountingStandard  @default(TT99)  // TT99, TT200, TT133
+  reportType        FinancialReportType
+  indicatorCode     String              // Report line code (e.g., "100", "131", "200", "312")
+  indicatorName     String              // Line item name in Vietnamese
+  indicatorNameEn   String?             // Line item name in English
+  parentIndicatorCode String?           // For hierarchical report structure
+  sortOrder         Int                 @default(0)
+  formula           String?             // Calculation formula (e.g., "100 + 200" or account code patterns)
+  accountPatterns   String[]            // Account code patterns to aggregate (e.g., ["131%", "1311", "131-*"])
+  balanceType       String?             // 'debit', 'credit', 'net' - which balance to use
+  isSubtotal        Boolean             @default(false)
+  isTotal           Boolean             @default(false)
+  notes             String?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  @@unique([standard, reportType, indicatorCode])
+  @@index([standard, reportType])
+  @@map("financial_report_definitions")
 }

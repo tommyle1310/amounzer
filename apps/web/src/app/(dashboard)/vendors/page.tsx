@@ -61,9 +61,11 @@ export default function VendorsPage() {
               Báo cáo tuổi nợ
             </Link>
           </Button>
-          <Button size="sm">
-            <Plus className="mr-1 h-4 w-4" />
-            Thêm nhà cung cấp
+          <Button size="sm" asChild>
+            <Link href="/vendors/new">
+              <Plus className="mr-1 h-4 w-4" />
+              Thêm nhà cung cấp
+            </Link>
           </Button>
         </div>
       </div>

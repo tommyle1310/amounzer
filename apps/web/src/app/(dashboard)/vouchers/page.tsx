@@ -97,6 +97,12 @@ export default function VouchersPage() {
             <BookCheck className="mr-2 h-4 w-4" />
             Ghi sổ hàng loạt
           </Button>
+          <Button variant="outline" asChild>
+            <Link href="/vouchers/ctgs">
+              <Plus className="mr-2 h-4 w-4" />
+              Chứng từ ghi sổ
+            </Link>
+          </Button>
           <Button asChild>
             <Link href="/vouchers/new">
               <Plus className="mr-2 h-4 w-4" />
@@ -120,6 +126,7 @@ export default function VouchersPage() {
             <option value="BDN">BDN - Giấy báo nợ</option>
             <option value="BCN">BCN - Giấy báo có</option>
             <option value="BT">BT - Chuyển khoản</option>
+            <option value="CTGS">CTGS - Chứng từ ghi sổ</option>
           </select>
           <select
             className="h-10 rounded-md border border-input bg-background px-3 text-sm"

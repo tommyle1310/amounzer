@@ -123,3 +123,143 @@ class ApiClient {
 }
 
 export const apiClient = new ApiClient();
+
+// ============================================================================
+// Type Definitions for API Responses
+// ============================================================================
+
+export interface Account {
+  id: string;
+  code: string;
+  name: string;
+  nameEn?: string;
+  accountType: string;
+  normalBalance: string;
+  isSpecialReciprocal?: boolean;
+  parentId?: string;
+}
+
+export interface Customer {
+  id: string;
+  code: string;
+  name: string;
+  taxCode?: string;
+  address?: string;
+  outstandingBalance?: number;
+}
+
+export interface Vendor {
+  id: string;
+  code: string;
+  name: string;
+  taxCode?: string;
+  address?: string;
+  outstandingBalance?: number;
+}
+
+export interface TrialBalanceLine {
+  id: string;
+  code: string;
+  name: string;
+  nameEn?: string;
+  level: number;
+  parentId?: string;
+  openingDebit: string;
+  openingCredit: string;
+  periodDebit: string;
+  periodCredit: string;
+  closingDebit: string;
+  closingCredit: string;
+  children?: TrialBalanceLine[];
+}
+
+export interface TrialBalanceReport {
+  reportType: string;
+  reportName: string;
+  startDate: string;
+  endDate: string;
+  lines: TrialBalanceLine[];
+  tree?: TrialBalanceLine[];
+  totals: {
+    openingDebit: string;
+    openingCredit: string;
+    periodDebit: string;
+    periodCredit: string;
+    closingDebit: string;
+    closingCredit: string;
+  };
+  validation: {
+    isFullyBalanced: boolean;
+  };
+}
+
+// ============================================================================
+// API Helper Functions
+// ============================================================================
+
+/**
+ * Suggest accounts with prefix/fuzzy search
+ * Should be called with debounce (300ms recommended)
+ */
+export async function suggestAccounts(query: string, limit = 20): Promise<Account[]> {
+  if (!query || query.length < 1) return [];
+  return apiClient.get<Account[]>(`/chart-of-accounts/suggest?q=${encodeURIComponent(query)}&limit=${limit}`);
+}
+
+/**
+ * Create a sub-account for a partner (customer/vendor)
+ */
+export async function createPartnerSubAccount(params: {
+  parentAccountCode: string;
+  partnerCode: string;
+  partnerName: string;
+  partnerType: 'customer' | 'vendor';
+  partnerId: string;
+}): Promise<Account> {
+  return apiClient.post<Account>('/chart-of-accounts/partner-subaccount', params);
+}
+
+/**
+ * Get Trial Balance report (S06-DN)
+ */
+export async function getTrialBalance(
+  startDate: string,
+  endDate: string,
+  options?: { showTree?: boolean; accountLevel?: number; showZeroBalance?: boolean },
+): Promise<TrialBalanceReport> {
+  const params = new URLSearchParams({
+    startDate,
+    endDate,
+    ...(options?.showTree !== undefined && { showTree: String(options.showTree) }),
+    ...(options?.accountLevel && { accountLevel: String(options.accountLevel) }),
+    ...(options?.showZeroBalance && { showZeroBalance: 'true' }),
+  });
+  return apiClient.get<TrialBalanceReport>(`/financial-reports/trial-balance?${params}`);
+}
+
+/**
+ * Get partner ledger (detailed transaction history)
+ */
+export async function getPartnerLedger(
+  partnerId: string,
+  partnerType: 'customer' | 'vendor',
+  startDate: string,
+  endDate: string,
+) {
+  const params = new URLSearchParams({ type: partnerType, startDate, endDate });
+  return apiClient.get(`/financial-reports/partner-ledger/${partnerId}?${params}`);
+}
+
+/**
+ * Get bank account detail for Notes disclosure
+ */
+export async function getBankAccountDetail(asOfDate: string) {
+  return apiClient.get(`/financial-reports/bank-detail?asOfDate=${asOfDate}`);
+}
+
+/**
+ * Seed chart of accounts with TT99/TT200/TT133 standard
+ */
+export async function seedChartOfAccounts(standard: 'TT99' | 'TT200' | 'TT133') {
+  return apiClient.post('/chart-of-accounts/seed', { standard });
+}

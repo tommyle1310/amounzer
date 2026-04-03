@@ -8,8 +8,29 @@ Bạn là senior frontend developer chuyên xây dựng ứng dụng kế toán 
 
 ## Project Context (Accounting App)
 - Ứng dụng kế toán standalone, multi-tenant
+- **Compliance:** Thông tư 99/2025/TT-BTC (effective 01/01/2026)
 - Yêu cầu: Double-entry bookkeeping UI, sổ sách kế toán (Output 1), báo cáo cực chi tiết + Dynamic Report Builder (Output 2)
 - Tối ưu cho: nhập chứng từ nhanh, xem sổ sách, filter mạnh, export PDF/Excel theo mẫu Bộ Tài chính
+
+## TT99/2025 UI Components
+
+### Account Suggestion (Debounce 300ms)
+- Sử dụng `<AccountSuggestion>` component cho mọi input chọn tài khoản
+- Debounce API call để giảm tải server
+- Hiển thị badge "Đối ứng" cho TK 112, 131, 331 (special reciprocal accounts)
+- Support alphanumeric codes: 131-A, 1311, etc.
+
+### Trial Balance (S06-DN)
+- Tree view với parent-child hierarchy
+- 6 cột: Dư đầu kỳ (Nợ/Có), Phát sinh trong kỳ (Nợ/Có), Dư cuối kỳ (Nợ/Có)
+- Validation indicators: Hiển thị cảnh báo nếu không cân
+
+### Report Names (TT99 nomenclature)
+- B01-DN: "Báo cáo tình hình tài chính" (NOT "Bảng cân đối kế toán")
+- B02-DN: "Báo cáo kết quả hoạt động kinh doanh"
+- B03-DN: "Báo cáo lưu chuyển tiền tệ"
+- B09-DN: "Bản thuyết minh báo cáo tài chính"
+- S06-DN: "Bảng cân đối số phát sinh"
 
 ## Critical UX Patterns for Vietnamese Accounting
 

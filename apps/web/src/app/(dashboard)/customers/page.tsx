@@ -61,9 +61,11 @@ export default function CustomersPage() {
               Báo cáo tuổi nợ
             </Link>
           </Button>
-          <Button size="sm">
-            <Plus className="mr-1 h-4 w-4" />
-            Thêm khách hàng
+          <Button size="sm" asChild>
+            <Link href="/customers/new">
+              <Plus className="mr-1 h-4 w-4" />
+              Thêm khách hàng
+            </Link>
           </Button>
         </div>
       </div>

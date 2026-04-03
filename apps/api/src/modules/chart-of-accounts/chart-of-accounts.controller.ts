@@ -71,6 +71,64 @@ export class ChartOfAccountsController {
     return this.chartService.search(req.companyId, query ?? '');
   }
 
+  /**
+   * Account suggestion API for debounced autocomplete
+   * Frontend should debounce calls by 300ms before hitting this endpoint
+   */
+  @Get('suggest')
+  @Roles('ADMIN', 'ACCOUNTANT', 'MANAGER', 'VIEWER')
+  async suggestAccounts(
+    @Request() req: { companyId: string },
+    @Query('q') query: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.chartService.suggestAccounts(
+      req.companyId,
+      query ?? '',
+      limit ? parseInt(limit, 10) : 20,
+    );
+  }
+
+  /**
+   * Get sub-accounts linked to a specific partner (customer/vendor)
+   */
+  @Get('partner/:partnerId/accounts')
+  @Roles('ADMIN', 'ACCOUNTANT', 'MANAGER', 'VIEWER')
+  async getPartnerSubAccounts(
+    @Request() req: { companyId: string },
+    @Param('partnerId') partnerId: string,
+    @Query('type') partnerType: 'customer' | 'vendor',
+  ) {
+    return this.chartService.getPartnerSubAccounts(req.companyId, partnerId, partnerType);
+  }
+
+  /**
+   * Create a sub-account for a partner (TT99 compliance - flexible sub-accounts)
+   */
+  @Post('partner-subaccount')
+  @Roles('ADMIN', 'ACCOUNTANT')
+  async createSubAccountForPartner(
+    @Request() req: { companyId: string; user: { sub: string } },
+    @Body()
+    body: {
+      parentAccountCode: string;
+      partnerCode: string;
+      partnerName: string;
+      partnerType: 'customer' | 'vendor';
+      partnerId: string;
+    },
+  ) {
+    return this.chartService.createSubAccountForPartner(
+      req.companyId,
+      body.parentAccountCode,
+      body.partnerCode,
+      body.partnerName,
+      body.partnerType,
+      body.partnerId,
+      req.user.sub,
+    );
+  }
+
   @Get(':id')
   @Roles('ADMIN', 'ACCOUNTANT', 'MANAGER', 'VIEWER')
   async findOne(
@@ -118,7 +176,7 @@ export class ChartOfAccountsController {
   @Roles('ADMIN')
   async seed(
     @Request() req: { companyId: string; user: { sub: string } },
-    @Body() body: { standard: 'TT200' | 'TT133' },
+    @Body() body: { standard: 'TT200' | 'TT133' | 'TT99' },
   ) {
     return this.chartService.seedChart(req.companyId, body.standard, req.user.sub);
   }

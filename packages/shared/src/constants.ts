@@ -1,7 +1,7 @@
 export const ROLES = ['ADMIN', 'ACCOUNTANT', 'MANAGER', 'VIEWER'] as const;
 export type RoleType = (typeof ROLES)[number];
 
-export const VOUCHER_TYPES = ['PT', 'PC', 'BDN', 'BCN', 'BT'] as const;
+export const VOUCHER_TYPES = ['PT', 'PC', 'BDN', 'BCN', 'BT', 'CTGS'] as const;
 export type VoucherTypeCode = (typeof VOUCHER_TYPES)[number];
 
 export const VOUCHER_TYPE_LABELS: Record<VoucherTypeCode, { vi: string; en: string }> = {
@@ -10,6 +10,7 @@ export const VOUCHER_TYPE_LABELS: Record<VoucherTypeCode, { vi: string; en: stri
   BDN: { vi: 'Giấy báo nợ', en: 'Bank Debit Note' },
   BCN: { vi: 'Giấy báo có', en: 'Bank Credit Note' },
   BT: { vi: 'Chuyển khoản', en: 'Bank Transfer' },
+  CTGS: { vi: 'Chứng từ ghi sổ', en: 'Journal Voucher' },
 };
 
 export const ACCOUNTING_STANDARDS = ['TT200', 'TT133'] as const;

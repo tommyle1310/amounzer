@@ -32,6 +32,7 @@ export class VendorController {
       phone?: string;
       email?: string;
       contactPerson?: string;
+      contactPhone?: string;
       bankAccount?: string;
       bankName?: string;
       customFieldValues?: Record<string, unknown>;
@@ -95,6 +96,7 @@ export class VendorController {
       phone?: string;
       email?: string;
       contactPerson?: string;
+      contactPhone?: string;
       bankAccount?: string;
       bankName?: string;
       customFieldValues?: Record<string, unknown>;

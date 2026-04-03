@@ -26,6 +26,7 @@ interface Account {
   id: string;
   code: string;
   name: string;
+  nameEn?: string;
 }
 
 interface FiscalYear {
@@ -74,6 +75,7 @@ export default function NewVoucherPage() {
   const [error, setError] = useState('');
   const [showCounterpartySuggestions, setShowCounterpartySuggestions] = useState(false);
   const [activeAccountLine, setActiveAccountLine] = useState<number | null>(null);
+  const [debouncedAccountQuery, setDebouncedAccountQuery] = useState('');
   
   // Legal document fields (TT200/TT133 compliance)
   const [showLegalFields, setShowLegalFields] = useState(false);
@@ -109,14 +111,23 @@ export default function NewVoucherPage() {
     }) ?? null;
   }, [date, fiscalYears]);
 
-  // Accounts search
+  // Debounce account search query (300ms)
+  useEffect(() => {
+    const query = activeAccountLine !== null ? lines[activeAccountLine]?.accountQuery ?? '' : '';
+    const timer = setTimeout(() => {
+      setDebouncedAccountQuery(query);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [activeAccountLine, lines]);
+
+  // Accounts search with debounced query
   const { data: accounts = [] } = useQuery<Account[]>({
-    queryKey: ['accounts-search', activeAccountLine !== null ? lines[activeAccountLine]?.accountQuery : ''],
+    queryKey: ['accounts-search', debouncedAccountQuery],
     queryFn: () =>
       apiClient.get(
-        `/chart-of-accounts/search?q=${encodeURIComponent(lines[activeAccountLine!]?.accountQuery ?? '')}`,
+        `/chart-of-accounts/search?q=${encodeURIComponent(debouncedAccountQuery)}`,
       ),
-    enabled: activeAccountLine !== null && (lines[activeAccountLine]?.accountQuery?.length ?? 0) >= 1,
+    enabled: debouncedAccountQuery.length >= 1,
   });
 
   // Counterparty search (customers + vendors)
@@ -533,11 +544,16 @@ export default function NewVoucherPage() {
                                 onClick={() => {
                                   updateLine(idx, 'accountId', acc.id);
                                   updateLine(idx, 'accountQuery', `${acc.code} - ${acc.name}`);
+                                  // Auto-fill description if empty
+                                  if (!line.description) {
+                                    updateLine(idx, 'description', acc.name);
+                                  }
                                   setActiveAccountLine(null);
                                 }}
                               >
                                 <span className="font-mono font-medium">{acc.code}</span>
                                 <span>{acc.name}</span>
+                                {acc.nameEn && <span className="text-muted-foreground">({acc.nameEn})</span>}
                               </button>
                             ))}
                           </div>
