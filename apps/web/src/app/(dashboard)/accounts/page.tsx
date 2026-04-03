@@ -163,13 +163,19 @@ export default function AccountsPage() {
   const seedMutation = useMutation({
     mutationFn: (standard: 'TT200' | 'TT133') =>
       apiClient.post('/chart-of-accounts/seed', { standard }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['chart-of-accounts'] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['chart-of-accounts'] });
+      queryClient.invalidateQueries({ queryKey: ['accounts-search'] });
+    },
   });
 
   const toggleActiveMutation = useMutation({
     mutationFn: ({ id, isActive }: { id: string; isActive: boolean }) =>
       apiClient.patch(`/chart-of-accounts/${id}`, { isActive }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['chart-of-accounts'] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['chart-of-accounts'] });
+      queryClient.invalidateQueries({ queryKey: ['accounts-search'] });
+    },
   });
 
   const createSubAccountMutation = useMutation({
@@ -182,6 +188,7 @@ export default function AccountsPage() {
     }) => apiClient.post('/chart-of-accounts/partner-subaccount', payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['chart-of-accounts'] });
+      queryClient.invalidateQueries({ queryKey: ['accounts-search'] });
       resetDialog();
     },
   });
@@ -196,6 +203,7 @@ export default function AccountsPage() {
     }) => apiClient.post('/chart-of-accounts/manual-subaccount', payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['chart-of-accounts'] });
+      queryClient.invalidateQueries({ queryKey: ['accounts-search'] });
       resetDialog();
     },
   });

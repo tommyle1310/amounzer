@@ -130,6 +130,8 @@ export default function NewCTGSPage() {
         `/chart-of-accounts/search?q=${encodeURIComponent(debouncedAccountQuery)}`,
       ),
     enabled: debouncedAccountQuery.length >= 1,
+    staleTime: 0,
+    gcTime: 30_000, // 30 seconds cache
   });
 
   // Customer search
