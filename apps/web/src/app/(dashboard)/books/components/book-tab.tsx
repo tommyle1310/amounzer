@@ -10,6 +10,7 @@ import { GeneralJournalTable } from './general-journal-table';
 import { GeneralLedgerSection } from './general-ledger-section';
 import { CashBookTable } from './cash-book-table';
 import { GenericLedgerTable } from './generic-ledger-table';
+import { PurchaseSalesJournalTable } from './purchase-sales-journal-table';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -56,6 +57,12 @@ export function BookTab({ bookKey, dateFrom, dateTo }: BookTabProps) {
     case 'cash':
     case 'bank':
       return <CashBookTable data={data} />;
+
+    case 'purchase-journal':
+      return <PurchaseSalesJournalTable data={data} type="purchase" />;
+
+    case 'sales-journal':
+      return <PurchaseSalesJournalTable data={data} type="sales" />;
 
     default:
       return <GenericLedgerTable data={data} />;

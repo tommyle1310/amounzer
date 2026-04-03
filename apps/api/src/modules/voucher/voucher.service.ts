@@ -20,7 +20,7 @@ interface VoucherLineData {
 }
 
 interface CreateVoucherData {
-  voucherType: 'PT' | 'PC' | 'BDN' | 'BCN' | 'BT';
+  voucherType: 'PT' | 'PC' | 'BDN' | 'BCN' | 'BT' | 'CTGS';
   date: string | Date;
   recordingDate?: string | Date;
   voucherBookNo?: string;
@@ -32,6 +32,13 @@ interface CreateVoucherData {
   partyFullName?: string;       // Họ tên người nộp/nhận tiền
   partyAddress?: string;        // Địa chỉ
   partyIdNumber?: string;       // CMND/CCCD
+  
+  // Alternative partner fields (will be mapped to counterparty)
+  customerId?: string;
+  vendorId?: string;
+  employeeId?: string;
+  partyName?: string;          // Alias for counterpartyName
+  partyTaxCode?: string;       // For reference
   
   description: string;
   totalAmount: number;
@@ -85,6 +92,24 @@ export class VoucherService {
       throw new BadRequestException('Năm tài chính đã đóng');
     }
 
+    // Map alternative partner fields to counterparty fields
+    let counterpartyId = data.counterpartyId;
+    let counterpartyType = data.counterpartyType;
+    let counterpartyName = data.counterpartyName ?? data.partyName;
+
+    if (!counterpartyId && (data.customerId || data.vendorId || data.employeeId)) {
+      if (data.customerId) {
+        counterpartyId = data.customerId;
+        counterpartyType = 'customer';
+      } else if (data.vendorId) {
+        counterpartyId = data.vendorId;
+        counterpartyType = 'vendor';
+      } else if (data.employeeId) {
+        counterpartyId = data.employeeId;
+        counterpartyType = 'employee';
+      }
+    }
+
     const voucherNumber = await this.generateVoucherNumber(
       companyId,
       data.voucherType,
@@ -106,11 +131,11 @@ export class VoucherService {
         date: new Date(data.date),
         recordingDate: data.recordingDate ? new Date(data.recordingDate) : undefined,
         
-        // Transaction party info
-        counterpartyName: data.counterpartyName,
-        counterpartyId: data.counterpartyId,
-        counterpartyType: data.counterpartyType,
-        partyFullName: data.partyFullName,
+        // Transaction party info (use mapped values)
+        counterpartyName,
+        counterpartyId,
+        counterpartyType,
+        partyFullName: data.partyFullName ?? counterpartyName,
         partyAddress: data.partyAddress,
         partyIdNumber: data.partyIdNumber,
         

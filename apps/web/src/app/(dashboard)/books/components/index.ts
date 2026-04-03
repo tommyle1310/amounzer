@@ -6,4 +6,5 @@ export { GeneralJournalTable } from './general-journal-table';
 export { GeneralLedgerSection } from './general-ledger-section';
 export { CashBookTable } from './cash-book-table';
 export { GenericLedgerTable } from './generic-ledger-table';
+export { PurchaseSalesJournalTable } from './purchase-sales-journal-table';
 export { BookTab } from './book-tab';

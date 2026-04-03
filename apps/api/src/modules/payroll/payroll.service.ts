@@ -73,19 +73,30 @@ export class PayrollService {
     });
   }
 
-  async findAllEmployees(companyId: string, pagination: Pagination = {}) {
+  async findAllEmployees(companyId: string, pagination: Pagination & { search?: string } = {}) {
     const page = pagination.page ?? 1;
     const limit = pagination.limit ?? 50;
     const skip = (page - 1) * limit;
+    const search = pagination.search?.trim();
+
+    const whereClause = {
+      companyId,
+      ...(search && {
+        OR: [
+          { code: { contains: search, mode: 'insensitive' as const } },
+          { name: { contains: search, mode: 'insensitive' as const } },
+        ],
+      }),
+    };
 
     const [data, total] = await Promise.all([
       this.prisma.employee.findMany({
-        where: { companyId },
+        where: whereClause,
         orderBy: { code: 'asc' },
         skip,
         take: limit,
       }),
-      this.prisma.employee.count({ where: { companyId } }),
+      this.prisma.employee.count({ where: whereClause }),
     ]);
 
     return {

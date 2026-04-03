@@ -46,10 +46,12 @@ export class PayrollController {
     @Request() req: { companyId: string },
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('search') search?: string,
   ) {
     return this.payrollService.findAllEmployees(req.companyId, {
       page: page ? parseInt(page, 10) : undefined,
       limit: limit ? parseInt(limit, 10) : undefined,
+      search,
     });
   }
 

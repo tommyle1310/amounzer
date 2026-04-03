@@ -268,8 +268,8 @@ export class ChartOfAccountsService {
     // Support combined queries like "131fab" or "131 fab" - code prefix + partner/name filter
     // First, try to extract code prefix (numbers at start) and name filter
     const match = query.trim().match(/^(\d+)\s*(.*)$/);
-    const codePrefix = match ? match[1] : query.trim();
-    const nameFilter = match ? match[2] : '';
+    const codePrefix = match?.[1] ?? query.trim();
+    const nameFilter = match?.[2] ?? '';
 
     // Build base conditions
     const conditions: { OR: object[] } = {

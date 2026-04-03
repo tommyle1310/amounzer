@@ -54,10 +54,10 @@ export default function VouchersPage() {
   const [dateTo, setDateTo] = useState('');
 
   const queryParams = new URLSearchParams();
-  if (typeFilter) queryParams.set('type', typeFilter);
+  if (typeFilter) queryParams.set('voucherType', typeFilter);
   if (statusFilter) queryParams.set('status', statusFilter);
-  if (dateFrom) queryParams.set('dateFrom', dateFrom);
-  if (dateTo) queryParams.set('dateTo', dateTo);
+  if (dateFrom) queryParams.set('startDate', dateFrom);
+  if (dateTo) queryParams.set('endDate', dateTo);
 
   const { data, isLoading } = useQuery<VouchersResponse>({
     queryKey: ['vouchers', typeFilter, statusFilter, dateFrom, dateTo],

@@ -560,14 +560,78 @@ export class AccountingBooksService {
         lines: {
           include: {
             account: { select: { code: true, name: true } },
-            vendor: { select: { code: true, name: true } },
+            vendor: { select: { code: true, name: true, taxCode: true, address: true } },
           },
           orderBy: { lineOrder: 'asc' },
         },
+        accountingTransaction: true,
       },
       orderBy: { postingDate: 'asc' },
       skip,
       take,
+    });
+
+    // Get voucher counterparty info for entries that have voucher source
+    const voucherIds = entries
+      .filter((e) => e.accountingTransaction?.sourceType === 'voucher')
+      .map((e) => e.accountingTransaction!.sourceId);
+
+    const vouchers = voucherIds.length > 0
+      ? await this.prisma.voucher.findMany({
+          where: { id: { in: voucherIds } },
+          select: {
+            id: true,
+            counterpartyId: true,
+            counterpartyType: true,
+            counterpartyName: true,
+            partyAddress: true,
+          },
+        })
+      : [];
+
+    // Fetch vendor info for voucher counterparties
+    const vendorIds = vouchers
+      .filter((v) => v.counterpartyType === 'vendor' && v.counterpartyId)
+      .map((v) => v.counterpartyId!);
+
+    const vendorMap = vendorIds.length > 0
+      ? new Map(
+          (await this.prisma.vendor.findMany({
+            where: { id: { in: vendorIds } },
+            select: { id: true, code: true, name: true, taxCode: true, address: true },
+          })).map((v) => [v.id, v]),
+        )
+      : new Map();
+
+    const voucherMap = new Map(vouchers.map((v) => [v.id, v]));
+
+    // Flatten entries to lines with entry info for easier frontend rendering
+    const flatLines = entries.flatMap((entry) => {
+      const voucher = entry.accountingTransaction?.sourceType === 'voucher'
+        ? voucherMap.get(entry.accountingTransaction.sourceId)
+        : null;
+      const voucherVendor = voucher?.counterpartyType === 'vendor' && voucher.counterpartyId
+        ? vendorMap.get(voucher.counterpartyId)
+        : null;
+
+      return entry.lines.map((line) => ({
+        ...line,
+        // Use line vendor if exists, otherwise use voucher's counterparty
+        vendor: line.vendor ?? voucherVendor ?? (voucher?.counterpartyName ? {
+          code: null,
+          name: voucher.counterpartyName,
+          taxCode: null,
+          address: voucher.partyAddress,
+        } : null),
+        journalEntry: {
+          entryNumber: entry.entryNumber,
+          postingDate: entry.postingDate,
+          description: entry.description,
+        },
+        contraAccounts: entry.lines
+          .filter((l) => l.id !== line.id)
+          .map((l) => ({ code: l.account.code, name: l.account.name })),
+      }));
     });
 
     let totalDebit = ZERO;
@@ -578,7 +642,7 @@ export class AccountingBooksService {
     }
 
     return {
-      data: entries,
+      data: flatLines,
       openingBalance: { debit: ZERO, credit: ZERO, balance: ZERO },
       closingBalance: { debit: totalDebit, credit: totalCredit, balance: totalDebit.sub(totalCredit) },
       totals: { totalDebit, totalCredit },
@@ -608,14 +672,78 @@ export class AccountingBooksService {
         lines: {
           include: {
             account: { select: { code: true, name: true } },
-            customer: { select: { code: true, name: true } },
+            customer: { select: { code: true, name: true, taxCode: true, address: true } },
           },
           orderBy: { lineOrder: 'asc' },
         },
+        accountingTransaction: true,
       },
       orderBy: { postingDate: 'asc' },
       skip,
       take,
+    });
+
+    // Get voucher counterparty info for entries that have voucher source
+    const voucherIds = entries
+      .filter((e) => e.accountingTransaction?.sourceType === 'voucher')
+      .map((e) => e.accountingTransaction!.sourceId);
+
+    const vouchers = voucherIds.length > 0
+      ? await this.prisma.voucher.findMany({
+          where: { id: { in: voucherIds } },
+          select: {
+            id: true,
+            counterpartyId: true,
+            counterpartyType: true,
+            counterpartyName: true,
+            partyAddress: true,
+          },
+        })
+      : [];
+
+    // Fetch customer info for voucher counterparties
+    const customerIds = vouchers
+      .filter((v) => v.counterpartyType === 'customer' && v.counterpartyId)
+      .map((v) => v.counterpartyId!);
+
+    const customerMap = customerIds.length > 0
+      ? new Map(
+          (await this.prisma.customer.findMany({
+            where: { id: { in: customerIds } },
+            select: { id: true, code: true, name: true, taxCode: true, address: true },
+          })).map((c) => [c.id, c]),
+        )
+      : new Map();
+
+    const voucherMap = new Map(vouchers.map((v) => [v.id, v]));
+
+    // Flatten entries to lines with entry info for easier frontend rendering
+    const flatLines = entries.flatMap((entry) => {
+      const voucher = entry.accountingTransaction?.sourceType === 'voucher'
+        ? voucherMap.get(entry.accountingTransaction.sourceId)
+        : null;
+      const voucherCustomer = voucher?.counterpartyType === 'customer' && voucher.counterpartyId
+        ? customerMap.get(voucher.counterpartyId)
+        : null;
+
+      return entry.lines.map((line) => ({
+        ...line,
+        // Use line customer if exists, otherwise use voucher's counterparty
+        customer: line.customer ?? voucherCustomer ?? (voucher?.counterpartyName ? {
+          code: null,
+          name: voucher.counterpartyName,
+          taxCode: null,
+          address: voucher.partyAddress,
+        } : null),
+        journalEntry: {
+          entryNumber: entry.entryNumber,
+          postingDate: entry.postingDate,
+          description: entry.description,
+        },
+        contraAccounts: entry.lines
+          .filter((l) => l.id !== line.id)
+          .map((l) => ({ code: l.account.code, name: l.account.name })),
+      }));
     });
 
     let totalDebit = ZERO;
@@ -626,7 +754,7 @@ export class AccountingBooksService {
     }
 
     return {
-      data: entries,
+      data: flatLines,
       openingBalance: { debit: ZERO, credit: ZERO, balance: ZERO },
       closingBalance: { debit: totalDebit, credit: totalCredit, balance: totalDebit.sub(totalCredit) },
       totals: { totalDebit, totalCredit },

@@ -33,8 +33,8 @@ export interface JournalEntryLine {
   sttNkc?: number | null;
   account?: { code: string; name: string };
   journalEntry?: JournalEntryInfo;
-  customer?: { name: string } | null;
-  vendor?: { name: string } | null;
+  customer?: { code?: string; name: string; taxCode?: string; address?: string } | null;
+  vendor?: { code?: string; name: string; taxCode?: string; address?: string } | null;
   contraAccounts?: ContraAccount[];
   runningBalance?: string | number;
   isNegativeBalance?: boolean;

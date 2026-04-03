@@ -29,6 +29,16 @@ interface Account {
   nameEn?: string;
 }
 
+interface Partner {
+  id: string;
+  code: string;
+  name: string;
+  taxCode?: string;
+  address?: string;
+}
+
+type PartnerType = 'customer' | 'vendor' | 'employee' | 'other' | '';
+
 interface FiscalYear {
   id: string;
   name: string;
@@ -62,6 +72,18 @@ export default function NewCTGSPage() {
   const [error, setError] = useState('');
   const [activeAccountLine, setActiveAccountLine] = useState<number | null>(null);
   const [debouncedAccountQuery, setDebouncedAccountQuery] = useState('');
+  
+  // Partner (đối tượng) fields
+  const [partnerType, setPartnerType] = useState<PartnerType>('');
+  const [partnerQuery, setPartnerQuery] = useState('');
+  const [debouncedPartnerQuery, setDebouncedPartnerQuery] = useState('');
+  const [selectedPartner, setSelectedPartner] = useState<Partner | null>(null);
+  const [showPartnerSuggestions, setShowPartnerSuggestions] = useState(false);
+  
+  // Manual input for 'other' type
+  const [otherPartnerName, setOtherPartnerName] = useState('');
+  const [otherPartnerTaxCode, setOtherPartnerTaxCode] = useState('');
+  const [otherPartnerAddress, setOtherPartnerAddress] = useState('');
 
   // Fetch fiscal years for the company
   const { data: fiscalYears = [] } = useQuery<FiscalYear[]>({
@@ -90,6 +112,14 @@ export default function NewCTGSPage() {
     return () => clearTimeout(timer);
   }, [activeAccountLine, lines]);
 
+  // Debounce partner search query (300ms)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedPartnerQuery(partnerQuery);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [partnerQuery]);
+
   // Accounts search with debounced query
   const { data: accounts = [] } = useQuery<Account[]>({
     queryKey: ['accounts-search', debouncedAccountQuery],
@@ -99,6 +129,36 @@ export default function NewCTGSPage() {
       ),
     enabled: debouncedAccountQuery.length >= 1,
   });
+
+  // Customer search
+  const { data: customersData } = useQuery<{ data: Partner[] }>({
+    queryKey: ['customers-search', debouncedPartnerQuery],
+    queryFn: () => apiClient.get(`/customers?search=${encodeURIComponent(debouncedPartnerQuery)}`),
+    enabled: partnerType === 'customer' && debouncedPartnerQuery.length >= 1,
+  });
+
+  // Vendor search
+  const { data: vendorsData } = useQuery<{ data: Partner[] }>({
+    queryKey: ['vendors-search', debouncedPartnerQuery],
+    queryFn: () => apiClient.get(`/vendors?search=${encodeURIComponent(debouncedPartnerQuery)}`),
+    enabled: partnerType === 'vendor' && debouncedPartnerQuery.length >= 1,
+  });
+
+  // Employee search
+  const { data: employeesData } = useQuery<{ data: Partner[] }>({
+    queryKey: ['employees-search', debouncedPartnerQuery],
+    queryFn: () => apiClient.get(`/payroll/employees?search=${encodeURIComponent(debouncedPartnerQuery)}`),
+    enabled: partnerType === 'employee' && debouncedPartnerQuery.length >= 1,
+  });
+
+  const partners = useMemo(() => {
+    switch (partnerType) {
+      case 'customer': return customersData?.data ?? [];
+      case 'vendor': return vendorsData?.data ?? [];
+      case 'employee': return employeesData?.data ?? [];
+      default: return [];
+    }
+  }, [partnerType, customersData?.data, vendorsData?.data, employeesData?.data]);
 
   const createMutation = useMutation({
     mutationFn: (payload: unknown) => apiClient.post('/vouchers', payload),
@@ -132,6 +192,13 @@ export default function NewCTGSPage() {
       return;
     }
     setError('');
+    
+    // Determine partner info based on type
+    const isOther = partnerType === 'other';
+    const partyName = isOther ? otherPartnerName : selectedPartner?.name;
+    const partyTaxCode = isOther ? otherPartnerTaxCode : selectedPartner?.taxCode;
+    const partyAddress = isOther ? otherPartnerAddress : selectedPartner?.address;
+    
     createMutation.mutate({
       voucherType: 'CTGS',
       date: new Date(date).toISOString(),
@@ -139,6 +206,12 @@ export default function NewCTGSPage() {
       totalAmount: totalDebit,
       amountInWords: numberToVietnameseWords(totalDebit, 'đồng'),
       fiscalYearId: currentFiscalYear.id,
+      customerId: partnerType === 'customer' ? selectedPartner?.id : undefined,
+      vendorId: partnerType === 'vendor' ? selectedPartner?.id : undefined,
+      employeeId: partnerType === 'employee' ? selectedPartner?.id : undefined,
+      partyName,
+      partyTaxCode,
+      partyAddress,
       lines: validLines.map(({ accountId, description: desc, debitAmount, creditAmount }) => ({
         accountId,
         description: desc,
@@ -194,6 +267,113 @@ export default function NewCTGSPage() {
               <Label>Ngày chứng từ *</Label>
               <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
             </div>
+            
+            {/* Partner (đối tượng) fields */}
+            <div className="space-y-2">
+              <Label>Loại đối tượng</Label>
+              <select
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={partnerType}
+                onChange={(e) => {
+                  setPartnerType(e.target.value as PartnerType);
+                  setSelectedPartner(null);
+                  setPartnerQuery('');
+                  setOtherPartnerName('');
+                  setOtherPartnerTaxCode('');
+                  setOtherPartnerAddress('');
+                }}
+              >
+                <option value="">-- Không chọn --</option>
+                <option value="customer">Khách hàng</option>
+                <option value="vendor">Nhà cung cấp</option>
+                <option value="employee">Nhân viên</option>
+                <option value="other">Đối tượng khác</option>
+              </select>
+            </div>
+            
+            {partnerType === 'other' ? (
+              // Manual input for 'other' type
+              <div className="space-y-2">
+                <Label>Tên đối tượng *</Label>
+                <Input
+                  value={otherPartnerName}
+                  onChange={(e) => setOtherPartnerName(e.target.value)}
+                  placeholder="Nhập tên đối tượng"
+                />
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Label>Đối tượng {partnerType ? '' : '(tùy chọn)'}</Label>
+                <div className="relative">
+                  <Input
+                    value={partnerQuery}
+                    onChange={(e) => {
+                      setPartnerQuery(e.target.value);
+                      setShowPartnerSuggestions(true);
+                    }}
+                    onFocus={() => setShowPartnerSuggestions(true)}
+                    placeholder={partnerType ? `Tìm ${partnerType === 'customer' ? 'khách hàng' : partnerType === 'vendor' ? 'nhà cung cấp' : 'nhân viên'}...` : 'Chọn loại đối tượng trước'}
+                    disabled={!partnerType}
+                  />
+                  {showPartnerSuggestions && partners.length > 0 && partnerQuery.length >= 1 && (
+                    <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-48 overflow-y-auto rounded-md border bg-background shadow-md">
+                      {partners.map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-sm hover:bg-accent"
+                          onClick={() => {
+                            setSelectedPartner(p);
+                            setPartnerQuery(`${p.code} - ${p.name}`);
+                            setShowPartnerSuggestions(false);
+                          }}
+                        >
+                          <span className="font-medium">{p.code} - {p.name}</span>
+                          {p.taxCode && <span className="text-xs text-muted-foreground">MST: {p.taxCode}</span>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+            
+            <div className="space-y-2">
+              <Label>MST (Mã số thuế)</Label>
+              {partnerType === 'other' ? (
+                <Input
+                  value={otherPartnerTaxCode}
+                  onChange={(e) => setOtherPartnerTaxCode(e.target.value)}
+                  placeholder="Nhập mã số thuế (tùy chọn)"
+                />
+              ) : (
+                <Input
+                  value={selectedPartner?.taxCode ?? ''}
+                  readOnly
+                  className="bg-muted"
+                  placeholder="Tự động điền từ đối tượng"
+                />
+              )}
+            </div>
+            
+            <div className="space-y-2">
+              <Label>Địa chỉ</Label>
+              {partnerType === 'other' ? (
+                <Input
+                  value={otherPartnerAddress}
+                  onChange={(e) => setOtherPartnerAddress(e.target.value)}
+                  placeholder="Nhập địa chỉ (tùy chọn)"
+                />
+              ) : (
+                <Input
+                  value={selectedPartner?.address ?? ''}
+                  readOnly
+                  className="bg-muted"
+                  placeholder="Tự động điền từ đối tượng"
+                />
+              )}
+            </div>
+            
             <div className="space-y-2 sm:col-span-2">
               <Label>Nội dung *</Label>
               <Input
