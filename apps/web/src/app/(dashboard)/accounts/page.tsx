@@ -125,9 +125,20 @@ export default function AccountsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddSubAccount, setShowAddSubAccount] = useState(false);
   const [selectedParentAccount, setSelectedParentAccount] = useState<Account | null>(null);
+  
+  // Mode: 'partner' for customer/vendor linked, 'manual' for custom sub-accounts
+  const [subAccountMode, setSubAccountMode] = useState<'partner' | 'manual'>('manual');
+  
+  // Partner mode fields
   const [partnerType, setPartnerType] = useState<'customer' | 'vendor'>('customer');
   const [partnerSearch, setPartnerSearch] = useState('');
   const [selectedPartner, setSelectedPartner] = useState<Partner | null>(null);
+  
+  // Manual mode fields
+  const [manualCodeSuffix, setManualCodeSuffix] = useState('');
+  const [manualName, setManualName] = useState('');
+  const [manualNameEn, setManualNameEn] = useState('');
+  const [manualDescription, setManualDescription] = useState('');
 
   const { data: accounts = [], isLoading } = useQuery<Account[]>({
     queryKey: ['chart-of-accounts'],
@@ -138,13 +149,13 @@ export default function AccountsPage() {
   const { data: customersData } = useQuery<{ data: Partner[] }>({
     queryKey: ['customers-search', partnerSearch],
     queryFn: () => apiClient.get(`/customers?search=${encodeURIComponent(partnerSearch)}`),
-    enabled: showAddSubAccount && partnerType === 'customer' && partnerSearch.length >= 1,
+    enabled: showAddSubAccount && subAccountMode === 'partner' && partnerType === 'customer' && partnerSearch.length >= 1,
   });
 
   const { data: vendorsData } = useQuery<{ data: Partner[] }>({
     queryKey: ['vendors-search', partnerSearch],
     queryFn: () => apiClient.get(`/vendors?search=${encodeURIComponent(partnerSearch)}`),
-    enabled: showAddSubAccount && partnerType === 'vendor' && partnerSearch.length >= 1,
+    enabled: showAddSubAccount && subAccountMode === 'partner' && partnerType === 'vendor' && partnerSearch.length >= 1,
   });
 
   const partners = partnerType === 'customer' ? (customersData?.data ?? []) : (vendorsData?.data ?? []);
@@ -171,12 +182,35 @@ export default function AccountsPage() {
     }) => apiClient.post('/chart-of-accounts/partner-subaccount', payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['chart-of-accounts'] });
-      setShowAddSubAccount(false);
-      setSelectedParentAccount(null);
-      setSelectedPartner(null);
-      setPartnerSearch('');
+      resetDialog();
     },
   });
+
+  const createManualSubAccountMutation = useMutation({
+    mutationFn: (payload: {
+      parentAccountCode: string;
+      codeSuffix: string;
+      name: string;
+      nameEn?: string;
+      description?: string;
+    }) => apiClient.post('/chart-of-accounts/manual-subaccount', payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['chart-of-accounts'] });
+      resetDialog();
+    },
+  });
+
+  function resetDialog() {
+    setShowAddSubAccount(false);
+    setSelectedParentAccount(null);
+    setSelectedPartner(null);
+    setPartnerSearch('');
+    setManualCodeSuffix('');
+    setManualName('');
+    setManualNameEn('');
+    setManualDescription('');
+    setSubAccountMode('manual');
+  }
 
   function filterAccounts(list: Account[], query: string): Account[] {
     if (!query) return list;
@@ -207,26 +241,50 @@ export default function AccountsPage() {
     const account = findAccountById(accounts, accountId);
     if (account) {
       setSelectedParentAccount(account);
-      // Auto-detect partner type based on account code
+      // Auto-detect mode based on account code
+      // Partner mode for receivables/payables accounts (131, 138, 331, 141)
       if (account.code.startsWith('131') || account.code.startsWith('138')) {
+        setSubAccountMode('partner');
         setPartnerType('customer');
       } else if (account.code.startsWith('331') || account.code.startsWith('141')) {
+        setSubAccountMode('partner');
         setPartnerType('vendor');
+      } else {
+        // Manual mode for other accounts (e.g., 333, 156, etc.)
+        setSubAccountMode('manual');
       }
       setShowAddSubAccount(true);
     }
   }
 
   function handleCreateSubAccount() {
-    if (!selectedParentAccount || !selectedPartner) return;
-    createSubAccountMutation.mutate({
-      parentAccountCode: selectedParentAccount.code,
-      partnerCode: selectedPartner.code,
-      partnerName: selectedPartner.name,
-      partnerType,
-      partnerId: selectedPartner.id,
-    });
+    if (!selectedParentAccount) return;
+    
+    if (subAccountMode === 'partner') {
+      if (!selectedPartner) return;
+      createSubAccountMutation.mutate({
+        parentAccountCode: selectedParentAccount.code,
+        partnerCode: selectedPartner.code,
+        partnerName: selectedPartner.name,
+        partnerType,
+        partnerId: selectedPartner.id,
+      });
+    } else {
+      if (!manualCodeSuffix || !manualName) return;
+      createManualSubAccountMutation.mutate({
+        parentAccountCode: selectedParentAccount.code,
+        codeSuffix: manualCodeSuffix,
+        name: manualName,
+        nameEn: manualNameEn || undefined,
+        description: manualDescription || undefined,
+      });
+    }
   }
+
+  const isCreating = createSubAccountMutation.isPending || createManualSubAccountMutation.isPending;
+  const canCreate = subAccountMode === 'partner' 
+    ? !!selectedPartner 
+    : (!!manualCodeSuffix && !!manualName);
 
   const filtered = filterAccounts(accounts, searchQuery);
 
@@ -259,19 +317,10 @@ export default function AccountsPage() {
       {/* Add Sub-Account Dialog */}
       {showAddSubAccount && selectedParentAccount && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <Card className="w-full max-w-md">
+          <Card className="w-full max-w-md max-h-[90vh] overflow-y-auto">
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="text-lg">Thêm tiểu khoản</CardTitle>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => {
-                  setShowAddSubAccount(false);
-                  setSelectedParentAccount(null);
-                  setSelectedPartner(null);
-                  setPartnerSearch('');
-                }}
-              >
+              <Button variant="ghost" size="icon" onClick={resetDialog}>
                 <X className="h-4 w-4" />
               </Button>
             </CardHeader>
@@ -285,101 +334,166 @@ export default function AccountsPage() {
                 />
               </div>
 
+              {/* Mode selector */}
               <div className="space-y-2">
-                <Label>Loại đối tượng</Label>
-                <select
-                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                  value={partnerType}
-                  onChange={(e) => {
-                    setPartnerType(e.target.value as 'customer' | 'vendor');
-                    setSelectedPartner(null);
-                    setPartnerSearch('');
-                  }}
-                >
-                  <option value="customer">Khách hàng (131, 138)</option>
-                  <option value="vendor">Nhà cung cấp (331, 141)</option>
-                </select>
+                <Label>Loại tiểu khoản</Label>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant={subAccountMode === 'manual' ? 'default' : 'outline'}
+                    size="sm"
+                    className="flex-1"
+                    onClick={() => setSubAccountMode('manual')}
+                  >
+                    Nhập thủ công
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={subAccountMode === 'partner' ? 'default' : 'outline'}
+                    size="sm"
+                    className="flex-1"
+                    onClick={() => setSubAccountMode('partner')}
+                  >
+                    Theo đối tượng
+                  </Button>
+                </div>
               </div>
 
-              <div className="relative space-y-2">
-                <Label>Chọn {partnerType === 'customer' ? 'khách hàng' : 'nhà cung cấp'}</Label>
-                {selectedPartner ? (
-                  <div className="flex items-center gap-2 rounded-md border p-2">
-                    <span className="font-mono text-sm">{selectedPartner.code}</span>
-                    <span className="flex-1 text-sm">{selectedPartner.name}</span>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6"
-                      onClick={() => {
+              {subAccountMode === 'manual' ? (
+                /* Manual mode */
+                <>
+                  <div className="space-y-2">
+                    <Label>Mã tiểu khoản (phần thêm) *</Label>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-sm text-muted-foreground">{selectedParentAccount.code}</span>
+                      <Input
+                        placeholder="8, 81, 82..."
+                        value={manualCodeSuffix}
+                        onChange={(e) => setManualCodeSuffix(e.target.value.replace(/[^0-9]/g, ''))}
+                        className="font-mono"
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Mã đầy đủ: <span className="font-mono font-medium">{selectedParentAccount.code}{manualCodeSuffix}</span>
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Tên tiểu khoản *</Label>
+                    <Input
+                      placeholder="VD: Thuế bảo vệ môi trường"
+                      value={manualName}
+                      onChange={(e) => setManualName(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Tên tiếng Anh</Label>
+                    <Input
+                      placeholder="VD: Environmental protection tax"
+                      value={manualNameEn}
+                      onChange={(e) => setManualNameEn(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Mô tả</Label>
+                    <Input
+                      placeholder="Mô tả thêm (tùy chọn)"
+                      value={manualDescription}
+                      onChange={(e) => setManualDescription(e.target.value)}
+                    />
+                  </div>
+                </>
+              ) : (
+                /* Partner mode */
+                <>
+                  <div className="space-y-2">
+                    <Label>Loại đối tượng</Label>
+                    <select
+                      className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                      value={partnerType}
+                      onChange={(e) => {
+                        setPartnerType(e.target.value as 'customer' | 'vendor');
                         setSelectedPartner(null);
                         setPartnerSearch('');
                       }}
                     >
-                      <X className="h-3 w-3" />
-                    </Button>
+                      <option value="customer">Khách hàng (131, 138)</option>
+                      <option value="vendor">Nhà cung cấp (331, 141)</option>
+                    </select>
                   </div>
-                ) : (
-                  <>
-                    <Input
-                      placeholder={`Tìm ${partnerType === 'customer' ? 'khách hàng' : 'nhà cung cấp'}...`}
-                      value={partnerSearch}
-                      onChange={(e) => setPartnerSearch(e.target.value)}
-                    />
-                    {partners.length > 0 && (
-                      <div className="absolute left-0 right-0 top-full z-10 mt-1 max-h-48 overflow-y-auto rounded-md border bg-background shadow-md">
-                        {partners.map((p) => (
-                          <button
-                            key={p.id}
-                            type="button"
-                            className="flex w-full gap-2 px-3 py-2 text-sm hover:bg-accent"
-                            onClick={() => {
-                              setSelectedPartner(p);
-                              setPartnerSearch('');
-                            }}
-                          >
-                            <span className="font-mono font-medium">{p.code}</span>
-                            <span className="flex-1 text-left">{p.name}</span>
-                            {p.taxCode && <span className="text-muted-foreground">{p.taxCode}</span>}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
 
-              {selectedPartner && (
-                <div className="space-y-2">
-                  <Label>Mã tiểu khoản mới</Label>
-                  <Input
-                    value={`${selectedParentAccount.code}-${selectedPartner.code}`}
-                    readOnly
-                    className="bg-muted font-mono"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Tên: {selectedParentAccount.name} - {selectedPartner.name}
-                  </p>
-                </div>
+                  <div className="relative space-y-2">
+                    <Label>Chọn {partnerType === 'customer' ? 'khách hàng' : 'nhà cung cấp'}</Label>
+                    {selectedPartner ? (
+                      <div className="flex items-center gap-2 rounded-md border p-2">
+                        <span className="font-mono text-sm">{selectedPartner.code}</span>
+                        <span className="flex-1 text-sm">{selectedPartner.name}</span>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6"
+                          onClick={() => {
+                            setSelectedPartner(null);
+                            setPartnerSearch('');
+                          }}
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <>
+                        <Input
+                          placeholder={`Tìm ${partnerType === 'customer' ? 'khách hàng' : 'nhà cung cấp'}...`}
+                          value={partnerSearch}
+                          onChange={(e) => setPartnerSearch(e.target.value)}
+                        />
+                        {partners.length > 0 && (
+                          <div className="absolute left-0 right-0 top-full z-10 mt-1 max-h-48 overflow-y-auto rounded-md border bg-background shadow-md">
+                            {partners.map((p) => (
+                              <button
+                                key={p.id}
+                                type="button"
+                                className="flex w-full gap-2 px-3 py-2 text-sm hover:bg-accent"
+                                onClick={() => {
+                                  setSelectedPartner(p);
+                                  setPartnerSearch('');
+                                }}
+                              >
+                                <span className="font-mono font-medium">{p.code}</span>
+                                <span className="flex-1 text-left">{p.name}</span>
+                                {p.taxCode && <span className="text-muted-foreground">{p.taxCode}</span>}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+
+                  {selectedPartner && (
+                    <div className="space-y-2">
+                      <Label>Mã tiểu khoản mới</Label>
+                      <Input
+                        value={`${selectedParentAccount.code}-${selectedPartner.code}`}
+                        readOnly
+                        className="bg-muted font-mono"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Tên: {selectedParentAccount.name} - {selectedPartner.name}
+                      </p>
+                    </div>
+                  )}
+                </>
               )}
 
               <div className="flex justify-end gap-2 pt-2">
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setShowAddSubAccount(false);
-                    setSelectedParentAccount(null);
-                    setSelectedPartner(null);
-                    setPartnerSearch('');
-                  }}
-                >
+                <Button variant="outline" onClick={resetDialog}>
                   Hủy
                 </Button>
-                <Button
-                  onClick={handleCreateSubAccount}
-                  disabled={!selectedPartner || createSubAccountMutation.isPending}
-                >
-                  {createSubAccountMutation.isPending ? 'Đang tạo...' : 'Tạo tiểu khoản'}
+                <Button onClick={handleCreateSubAccount} disabled={!canCreate || isCreating}>
+                  {isCreating ? 'Đang tạo...' : 'Tạo tiểu khoản'}
                 </Button>
               </div>
             </CardContent>

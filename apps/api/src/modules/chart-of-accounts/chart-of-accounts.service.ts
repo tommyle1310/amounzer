@@ -823,6 +823,71 @@ export class ChartOfAccountsService {
   }
 
   /**
+   * Create a manual sub-account (not linked to partner)
+   * For accounts like 333 > 3338 > 33381, 33382
+   */
+  async createManualSubAccount(
+    companyId: string,
+    parentAccountCode: string,
+    codeSuffix: string,
+    name: string,
+    nameEn?: string,
+    description?: string,
+    userId?: string,
+  ) {
+    const parentAccount = await this.prisma.ledgerAccount.findUnique({
+      where: { companyId_code: { companyId, code: parentAccountCode } },
+    });
+
+    if (!parentAccount) {
+      throw new NotFoundException(`Parent account ${parentAccountCode} not found`);
+    }
+
+    // Generate sub-account code: [parentCode][suffix]
+    const subAccountCode = `${parentAccountCode}${codeSuffix}`;
+
+    // Check if already exists
+    const existing = await this.prisma.ledgerAccount.findUnique({
+      where: { companyId_code: { companyId, code: subAccountCode } },
+    });
+
+    if (existing) {
+      throw new ConflictException(`Account code ${subAccountCode} already exists`);
+    }
+
+    // Create sub-account with inherited type from parent
+    const result = await this.prisma.ledgerAccount.create({
+      data: {
+        companyId,
+        code: subAccountCode,
+        name,
+        nameEn,
+        description,
+        accountType: parentAccount.accountType,
+        normalBalance: parentAccount.normalBalance,
+        parentId: parentAccount.id,
+        level: parentAccount.level + 1,
+        isSystem: false,
+        isSpecialReciprocal: parentAccount.isSpecialReciprocal,
+      },
+    });
+
+    if (userId) {
+      await this.auditService.create(
+        companyId,
+        userId,
+        'CREATE',
+        'LedgerAccount',
+        result.id,
+        undefined,
+        { ...result, source: 'manual-subaccount' } as unknown as Record<string, unknown>,
+      );
+    }
+
+    return result;
+  }
+
+  /**
    * Get all sub-accounts for a specific partner
    */
   async getPartnerSubAccounts(companyId: string, partnerId: string, partnerType: 'customer' | 'vendor') {

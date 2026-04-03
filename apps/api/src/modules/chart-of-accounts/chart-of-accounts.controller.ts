@@ -129,6 +129,34 @@ export class ChartOfAccountsController {
     );
   }
 
+  /**
+   * Create a manual sub-account (not linked to partner)
+   * For accounts like 333 > 3338 > 33381, 33382
+   */
+  @Post('manual-subaccount')
+  @Roles('ADMIN', 'ACCOUNTANT')
+  async createManualSubAccount(
+    @Request() req: { companyId: string; user: { sub: string } },
+    @Body()
+    body: {
+      parentAccountCode: string;
+      codeSuffix: string;
+      name: string;
+      nameEn?: string;
+      description?: string;
+    },
+  ) {
+    return this.chartService.createManualSubAccount(
+      req.companyId,
+      body.parentAccountCode,
+      body.codeSuffix,
+      body.name,
+      body.nameEn,
+      body.description,
+      req.user.sub,
+    );
+  }
+
   @Get(':id')
   @Roles('ADMIN', 'ACCOUNTANT', 'MANAGER', 'VIEWER')
   async findOne(

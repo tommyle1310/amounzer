@@ -438,7 +438,7 @@ export class VoucherService {
     const lastVoucher = await this.prisma.voucher.findFirst({
       where: {
         companyId,
-        voucherType: voucherType as 'PT' | 'PC' | 'BDN' | 'BCN' | 'BT',
+        voucherType: voucherType as 'PT' | 'PC' | 'BDN' | 'BCN' | 'BT' | 'CTGS',
         voucherNumber: { startsWith: `${voucherType}-${year}-` },
       },
       orderBy: { voucherNumber: 'desc' },

@@ -79,6 +79,8 @@ export default function NewCTGSPage() {
   const [debouncedPartnerQuery, setDebouncedPartnerQuery] = useState('');
   const [selectedPartner, setSelectedPartner] = useState<Partner | null>(null);
   const [showPartnerSuggestions, setShowPartnerSuggestions] = useState(false);
+  const [partnerHighlightIndex, setPartnerHighlightIndex] = useState(-1);
+  const [accountHighlightIndex, setAccountHighlightIndex] = useState(-1);
   
   // Manual input for 'other' type
   const [otherPartnerName, setOtherPartnerName] = useState('');
@@ -169,6 +171,68 @@ export default function NewCTGSPage() {
   const updateLine = useCallback((index: number, field: keyof JournalLine, value: string | number) => {
     setLines((prev) => prev.map((l, i) => (i === index ? { ...l, [field]: value } : l)));
   }, []);
+
+  // Reset highlight index when results change
+  useEffect(() => {
+    setPartnerHighlightIndex(-1);
+  }, [partners]);
+
+  useEffect(() => {
+    setAccountHighlightIndex(-1);
+  }, [accounts]);
+
+  // Keyboard handler for partner dropdown
+  const handlePartnerKeyDown = (e: React.KeyboardEvent) => {
+    if (!showPartnerSuggestions || partners.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setPartnerHighlightIndex((prev) => (prev < partners.length - 1 ? prev + 1 : 0));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setPartnerHighlightIndex((prev) => (prev > 0 ? prev - 1 : partners.length - 1));
+    } else if (e.key === 'Enter' && partnerHighlightIndex >= 0) {
+      e.preventDefault();
+      const p = partners[partnerHighlightIndex];
+      if (p) {
+        setSelectedPartner(p);
+        setPartnerQuery(`${p.code} - ${p.name}`);
+        setShowPartnerSuggestions(false);
+        setPartnerHighlightIndex(-1);
+      }
+    } else if (e.key === 'Escape') {
+      setShowPartnerSuggestions(false);
+      setPartnerHighlightIndex(-1);
+    }
+  };
+
+  // Keyboard handler for account dropdown
+  const handleAccountKeyDown = (e: React.KeyboardEvent, idx: number) => {
+    if (activeAccountLine !== idx || accounts.length === 0) return;
+    const line = lines[idx];
+    if (!line || line.accountQuery.length < 1) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setAccountHighlightIndex((prev) => (prev < accounts.length - 1 ? prev + 1 : 0));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setAccountHighlightIndex((prev) => (prev > 0 ? prev - 1 : accounts.length - 1));
+    } else if (e.key === 'Enter' && accountHighlightIndex >= 0) {
+      e.preventDefault();
+      const acc = accounts[accountHighlightIndex];
+      if (acc) {
+        updateLine(idx, 'accountId', acc.id);
+        updateLine(idx, 'accountQuery', `${acc.code} - ${acc.name}`);
+        if (!line.description) {
+          updateLine(idx, 'description', acc.name);
+        }
+        setActiveAccountLine(null);
+        setAccountHighlightIndex(-1);
+      }
+    } else if (e.key === 'Escape') {
+      setActiveAccountLine(null);
+      setAccountHighlightIndex(-1);
+    }
+  };
 
   const totalDebit = lines.reduce((sum, l) => sum + (Number(l.debitAmount) || 0), 0);
   const totalCredit = lines.reduce((sum, l) => sum + (Number(l.creditAmount) || 0), 0);
@@ -312,6 +376,8 @@ export default function NewCTGSPage() {
                       setShowPartnerSuggestions(true);
                     }}
                     onFocus={() => setShowPartnerSuggestions(true)}
+                    onBlur={() => setTimeout(() => setShowPartnerSuggestions(false), 200)}
+                    onKeyDown={handlePartnerKeyDown}
                     placeholder={partnerType ? `Tìm ${partnerType === 'customer' ? 'khách hàng' : partnerType === 'vendor' ? 'nhà cung cấp' : 'nhân viên'}...` : 'Chọn loại đối tượng trước'}
                     disabled={!partnerType}
                   />
@@ -321,11 +387,13 @@ export default function NewCTGSPage() {
                         <button
                           key={p.id}
                           type="button"
-                          className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-sm hover:bg-accent"
+                          className={`flex w-full flex-col items-start gap-0.5 px-3 py-2 text-sm hover:bg-accent ${partners.indexOf(p) === partnerHighlightIndex ? 'bg-accent' : ''}`}
+                          onMouseDown={(e) => e.preventDefault()}
                           onClick={() => {
                             setSelectedPartner(p);
                             setPartnerQuery(`${p.code} - ${p.name}`);
                             setShowPartnerSuggestions(false);
+                            setPartnerHighlightIndex(-1);
                           }}
                         >
                           <span className="font-medium">{p.code} - {p.name}</span>
@@ -441,6 +509,8 @@ export default function NewCTGSPage() {
                             setActiveAccountLine(idx);
                           }}
                           onFocus={() => setActiveAccountLine(idx)}
+                          onBlur={() => setTimeout(() => { setActiveAccountLine(null); setAccountHighlightIndex(-1); }, 200)}
+                          onKeyDown={(e) => handleAccountKeyDown(e, idx)}
                           placeholder="Mã hoặc tên TK"
                           className="text-sm"
                         />
@@ -450,7 +520,8 @@ export default function NewCTGSPage() {
                               <button
                                 key={acc.id}
                                 type="button"
-                                className="flex w-full gap-2 px-3 py-2 text-sm hover:bg-accent"
+                                className={`flex w-full gap-2 px-3 py-2 text-sm hover:bg-accent ${accounts.indexOf(acc) === accountHighlightIndex ? 'bg-accent' : ''}`}
+                                onMouseDown={(e) => e.preventDefault()}
                                 onClick={() => {
                                   updateLine(idx, 'accountId', acc.id);
                                   updateLine(idx, 'accountQuery', `${acc.code} - ${acc.name}`);
@@ -459,6 +530,7 @@ export default function NewCTGSPage() {
                                     updateLine(idx, 'description', acc.name);
                                   }
                                   setActiveAccountLine(null);
+                                  setAccountHighlightIndex(-1);
                                 }}
                               >
                                 <span className="font-mono font-medium">{acc.code}</span>
@@ -484,6 +556,14 @@ export default function NewCTGSPage() {
                         min={0}
                         value={line.debitAmount || ''}
                         onChange={(e) => updateLine(idx, 'debitAmount', parseFloat(e.target.value) || 0)}
+                        onPaste={(e) => {
+                          const pasted = e.clipboardData.getData('text').replace(/,/g, '');
+                          const num = parseFloat(pasted) || 0;
+                          if (num) {
+                            e.preventDefault();
+                            updateLine(idx, 'debitAmount', num);
+                          }
+                        }}
                         className="text-right text-sm font-mono"
                         tabIndex={0}
                       />
@@ -494,6 +574,14 @@ export default function NewCTGSPage() {
                         min={0}
                         value={line.creditAmount || ''}
                         onChange={(e) => updateLine(idx, 'creditAmount', parseFloat(e.target.value) || 0)}
+                        onPaste={(e) => {
+                          const pasted = e.clipboardData.getData('text').replace(/,/g, '');
+                          const num = parseFloat(pasted) || 0;
+                          if (num) {
+                            e.preventDefault();
+                            updateLine(idx, 'creditAmount', num);
+                          }
+                        }}
                         className="text-right text-sm font-mono"
                         tabIndex={0}
                       />

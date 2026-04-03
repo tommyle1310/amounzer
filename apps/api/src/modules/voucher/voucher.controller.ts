@@ -24,7 +24,7 @@ export class VoucherController {
     @Request() req: { companyId: string; user: { sub: string } },
     @Body()
     body: {
-      voucherType: 'PT' | 'PC' | 'BDN' | 'BCN' | 'BT';
+      voucherType: 'PT' | 'PC' | 'BDN' | 'BCN' | 'BT' | 'CTGS';
       date: string;
       recordingDate?: string;
       voucherBookNo?: string;

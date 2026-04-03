@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { formatVND, formatDateVN, VOUCHER_TYPE_LABELS, type VoucherTypeCode } from '@amounzer/shared';
@@ -46,12 +46,57 @@ const statusColors: Record<string, string> = {
   CANCELLED: 'text-red-600 bg-red-50',
 };
 
+// Column definitions with default widths
+const defaultColumnWidths: Record<string, number> = {
+  voucherNumber: 140,
+  voucherType: 100,
+  date: 100,
+  counterparty: 180,
+  description: 200,
+  amount: 140,
+  status: 100,
+  actions: 100,
+};
+
 export default function VouchersPage() {
   const queryClient = useQueryClient();
   const [typeFilter, setTypeFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  
+  // Column resize state
+  const [columnWidths, setColumnWidths] = useState(defaultColumnWidths);
+  const resizingRef = useRef<{ column: string; startX: number; startWidth: number } | null>(null);
+
+  // Handle column resize
+  const handleResizeStart = useCallback((column: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    resizingRef.current = {
+      column,
+      startX: e.clientX,
+      startWidth: columnWidths[column] ?? 100,
+    };
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      if (!resizingRef.current) return;
+      const diff = moveEvent.clientX - resizingRef.current.startX;
+      const newWidth = Math.max(50, resizingRef.current.startWidth + diff);
+      setColumnWidths((prev) => ({
+        ...prev,
+        [resizingRef.current!.column]: newWidth,
+      }));
+    };
+
+    const handleMouseUp = () => {
+      resizingRef.current = null;
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  }, [columnWidths]);
 
   const queryParams = new URLSearchParams();
   if (typeFilter) queryParams.set('voucherType', typeFilter);
@@ -157,18 +202,62 @@ export default function VouchersPage() {
 
       {/* Data table */}
       <Card>
-        <CardContent className="p-0">
-          <Table>
+        <CardContent className="p-0 overflow-x-auto">
+          <Table style={{ tableLayout: 'fixed', width: Object.values(columnWidths).reduce((a, b) => a + b, 0) }}>
             <TableHeader>
               <TableRow>
-                <TableHead>Số chứng từ</TableHead>
-                <TableHead>Loại</TableHead>
-                <TableHead>Ngày</TableHead>
-                <TableHead>Đối tượng</TableHead>
-                <TableHead>Nội dung</TableHead>
-                <TableHead className="text-right">Số tiền (₫)</TableHead>
-                <TableHead>Trạng thái</TableHead>
-                <TableHead className="text-right">Thao tác</TableHead>
+                <TableHead className="relative" style={{ width: columnWidths.voucherNumber }}>
+                  Số chứng từ
+                  <div
+                    className="absolute inset-y-0 right-0 w-1 cursor-col-resize select-none hover:bg-primary/50 z-10"
+                    onMouseDown={(e) => handleResizeStart('voucherNumber', e)}
+                  />
+                </TableHead>
+                <TableHead className="relative" style={{ width: columnWidths.voucherType }}>
+                  Loại
+                  <div
+                    className="absolute inset-y-0 right-0 w-1 cursor-col-resize select-none hover:bg-primary/50 z-10"
+                    onMouseDown={(e) => handleResizeStart('voucherType', e)}
+                  />
+                </TableHead>
+                <TableHead className="relative" style={{ width: columnWidths.date }}>
+                  Ngày
+                  <div
+                    className="absolute inset-y-0 right-0 w-1 cursor-col-resize select-none hover:bg-primary/50 z-10"
+                    onMouseDown={(e) => handleResizeStart('date', e)}
+                  />
+                </TableHead>
+                <TableHead className="relative" style={{ width: columnWidths.counterparty }}>
+                  Đối tượng
+                  <div
+                    className="absolute inset-y-0 right-0 w-1 cursor-col-resize select-none hover:bg-primary/50 z-10"
+                    onMouseDown={(e) => handleResizeStart('counterparty', e)}
+                  />
+                </TableHead>
+                <TableHead className="relative" style={{ width: columnWidths.description }}>
+                  Nội dung
+                  <div
+                    className="absolute inset-y-0 right-0 w-1 cursor-col-resize select-none hover:bg-primary/50 z-10"
+                    onMouseDown={(e) => handleResizeStart('description', e)}
+                  />
+                </TableHead>
+                <TableHead className="relative text-right" style={{ width: columnWidths.amount }}>
+                  Số tiền (₫)
+                  <div
+                    className="absolute inset-y-0 right-0 w-1 cursor-col-resize select-none hover:bg-primary/50 z-10"
+                    onMouseDown={(e) => handleResizeStart('amount', e)}
+                  />
+                </TableHead>
+                <TableHead className="relative" style={{ width: columnWidths.status }}>
+                  Trạng thái
+                  <div
+                    className="absolute inset-y-0 right-0 w-1 cursor-col-resize select-none hover:bg-primary/50 z-10"
+                    onMouseDown={(e) => handleResizeStart('status', e)}
+                  />
+                </TableHead>
+                <TableHead className="text-right" style={{ width: columnWidths.actions }}>
+                  Thao tác
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -187,20 +276,20 @@ export default function VouchersPage() {
               ) : (
                 vouchers.map((v) => (
                   <TableRow key={v.id}>
-                    <TableCell className="font-medium">{v.voucherNumber}</TableCell>
-                    <TableCell>{VOUCHER_TYPE_LABELS[v.voucherType]?.vi ?? v.voucherType}</TableCell>
-                    <TableCell>{formatDateVN(v.date)}</TableCell>
-                    <TableCell>{v.counterpartyName ?? '—'}</TableCell>
-                    <TableCell className="max-w-[200px] truncate">{v.description}</TableCell>
-                    <TableCell className="text-right font-mono">{formatVND(v.totalAmount)}</TableCell>
-                    <TableCell>
+                    <TableCell className="font-medium truncate" style={{ width: columnWidths.voucherNumber }}>{v.voucherNumber}</TableCell>
+                    <TableCell className="truncate" style={{ width: columnWidths.voucherType }}>{VOUCHER_TYPE_LABELS[v.voucherType]?.vi ?? v.voucherType}</TableCell>
+                    <TableCell className="truncate" style={{ width: columnWidths.date }}>{formatDateVN(v.date)}</TableCell>
+                    <TableCell className="truncate" style={{ width: columnWidths.counterparty }}>{v.counterpartyName ?? '—'}</TableCell>
+                    <TableCell className="truncate" style={{ width: columnWidths.description }}>{v.description}</TableCell>
+                    <TableCell className="text-right font-mono truncate" style={{ width: columnWidths.amount }}>{formatVND(v.totalAmount)}</TableCell>
+                    <TableCell style={{ width: columnWidths.status }}>
                       <span
                         className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${statusColors[v.status] ?? ''}`}
                       >
                         {statusLabels[v.status] ?? v.status}
                       </span>
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-right" style={{ width: columnWidths.actions }}>
                       <div className="flex justify-end gap-1">
                         <Button variant="ghost" size="icon" asChild>
                           <Link href={`/vouchers/${v.id}`}>

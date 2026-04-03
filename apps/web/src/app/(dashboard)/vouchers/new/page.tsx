@@ -74,8 +74,10 @@ export default function NewVoucherPage() {
   const [lines, setLines] = useState<JournalLine[]>([emptyLine(), emptyLine()]);
   const [error, setError] = useState('');
   const [showCounterpartySuggestions, setShowCounterpartySuggestions] = useState(false);
+  const [counterpartyHighlightIndex, setCounterpartyHighlightIndex] = useState(-1);
   const [activeAccountLine, setActiveAccountLine] = useState<number | null>(null);
   const [debouncedAccountQuery, setDebouncedAccountQuery] = useState('');
+  const [accountHighlightIndex, setAccountHighlightIndex] = useState(-1);
   
   // Legal document fields (TT200/TT133 compliance)
   const [showLegalFields, setShowLegalFields] = useState(false);
@@ -157,6 +159,69 @@ export default function NewVoucherPage() {
   const updateLine = useCallback((index: number, field: keyof JournalLine, value: string | number) => {
     setLines((prev) => prev.map((l, i) => (i === index ? { ...l, [field]: value } : l)));
   }, []);
+
+  // Reset highlight index when results change
+  useEffect(() => {
+    setCounterpartyHighlightIndex(-1);
+  }, [counterparties.length]);
+
+  useEffect(() => {
+    setAccountHighlightIndex(-1);
+  }, [accounts]);
+
+  // Keyboard handler for counterparty dropdown
+  const handleCounterpartyKeyDown = (e: React.KeyboardEvent) => {
+    if (!showCounterpartySuggestions || counterparties.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setCounterpartyHighlightIndex((prev) => (prev < counterparties.length - 1 ? prev + 1 : 0));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setCounterpartyHighlightIndex((prev) => (prev > 0 ? prev - 1 : counterparties.length - 1));
+    } else if (e.key === 'Enter' && counterpartyHighlightIndex >= 0) {
+      e.preventDefault();
+      const cp = counterparties[counterpartyHighlightIndex];
+      if (cp) {
+        setCounterpartyId(cp.id);
+        setCounterpartyName(cp.name);
+        setCounterpartyQuery(cp.name);
+        setShowCounterpartySuggestions(false);
+        setCounterpartyHighlightIndex(-1);
+      }
+    } else if (e.key === 'Escape') {
+      setShowCounterpartySuggestions(false);
+      setCounterpartyHighlightIndex(-1);
+    }
+  };
+
+  // Keyboard handler for account dropdown
+  const handleAccountKeyDown = (e: React.KeyboardEvent, idx: number) => {
+    if (activeAccountLine !== idx || accounts.length === 0) return;
+    const line = lines[idx];
+    if (!line || line.accountQuery.length < 1) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setAccountHighlightIndex((prev) => (prev < accounts.length - 1 ? prev + 1 : 0));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setAccountHighlightIndex((prev) => (prev > 0 ? prev - 1 : accounts.length - 1));
+    } else if (e.key === 'Enter' && accountHighlightIndex >= 0) {
+      e.preventDefault();
+      const acc = accounts[accountHighlightIndex];
+      if (acc) {
+        updateLine(idx, 'accountId', acc.id);
+        updateLine(idx, 'accountQuery', `${acc.code} - ${acc.name}`);
+        if (!line.description) {
+          updateLine(idx, 'description', acc.name);
+        }
+        setActiveAccountLine(null);
+        setAccountHighlightIndex(-1);
+      }
+    } else if (e.key === 'Escape') {
+      setActiveAccountLine(null);
+      setAccountHighlightIndex(-1);
+    }
+  };
 
   const totalDebit = lines.reduce((sum, l) => sum + (Number(l.debitAmount) || 0), 0);
   const totalCredit = lines.reduce((sum, l) => sum + (Number(l.creditAmount) || 0), 0);
@@ -293,6 +358,8 @@ export default function NewVoucherPage() {
                   setShowCounterpartySuggestions(true);
                 }}
                 onFocus={() => setShowCounterpartySuggestions(true)}
+                onBlur={() => setTimeout(() => setShowCounterpartySuggestions(false), 200)}
+                onKeyDown={handleCounterpartyKeyDown}
                 placeholder="Tìm khách hàng / nhà cung cấp..."
               />
               {showCounterpartySuggestions && counterparties.length > 0 && (
@@ -301,12 +368,14 @@ export default function NewVoucherPage() {
                     <button
                       key={cp.id}
                       type="button"
-                      className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-accent"
+                      className={`flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-accent ${counterparties.indexOf(cp) === counterpartyHighlightIndex ? 'bg-accent' : ''}`}
+                      onMouseDown={(e) => e.preventDefault()}
                       onClick={() => {
                         setCounterpartyId(cp.id);
                         setCounterpartyName(cp.name);
                         setCounterpartyQuery(cp.name);
                         setShowCounterpartySuggestions(false);
+                        setCounterpartyHighlightIndex(-1);
                       }}
                     >
                       <span className="font-medium">{cp.name}</span>
@@ -531,6 +600,8 @@ export default function NewVoucherPage() {
                             setActiveAccountLine(idx);
                           }}
                           onFocus={() => setActiveAccountLine(idx)}
+                          onBlur={() => setTimeout(() => { setActiveAccountLine(null); setAccountHighlightIndex(-1); }, 200)}
+                          onKeyDown={(e) => handleAccountKeyDown(e, idx)}
                           placeholder="Mã hoặc tên TK"
                           className="text-sm"
                         />
@@ -540,7 +611,8 @@ export default function NewVoucherPage() {
                               <button
                                 key={acc.id}
                                 type="button"
-                                className="flex w-full gap-2 px-3 py-2 text-sm hover:bg-accent"
+                                className={`flex w-full gap-2 px-3 py-2 text-sm hover:bg-accent ${accounts.indexOf(acc) === accountHighlightIndex ? 'bg-accent' : ''}`}
+                                onMouseDown={(e) => e.preventDefault()}
                                 onClick={() => {
                                   updateLine(idx, 'accountId', acc.id);
                                   updateLine(idx, 'accountQuery', `${acc.code} - ${acc.name}`);
@@ -549,6 +621,7 @@ export default function NewVoucherPage() {
                                     updateLine(idx, 'description', acc.name);
                                   }
                                   setActiveAccountLine(null);
+                                  setAccountHighlightIndex(-1);
                                 }}
                               >
                                 <span className="font-mono font-medium">{acc.code}</span>
@@ -574,6 +647,14 @@ export default function NewVoucherPage() {
                         min={0}
                         value={line.debitAmount || ''}
                         onChange={(e) => updateLine(idx, 'debitAmount', parseFloat(e.target.value) || 0)}
+                        onPaste={(e) => {
+                          const pasted = e.clipboardData.getData('text').replace(/,/g, '');
+                          const num = parseFloat(pasted) || 0;
+                          if (num) {
+                            e.preventDefault();
+                            updateLine(idx, 'debitAmount', num);
+                          }
+                        }}
                         className="text-right text-sm font-mono"
                         tabIndex={0}
                       />
@@ -584,6 +665,14 @@ export default function NewVoucherPage() {
                         min={0}
                         value={line.creditAmount || ''}
                         onChange={(e) => updateLine(idx, 'creditAmount', parseFloat(e.target.value) || 0)}
+                        onPaste={(e) => {
+                          const pasted = e.clipboardData.getData('text').replace(/,/g, '');
+                          const num = parseFloat(pasted) || 0;
+                          if (num) {
+                            e.preventDefault();
+                            updateLine(idx, 'creditAmount', num);
+                          }
+                        }}
                         className="text-right text-sm font-mono"
                         tabIndex={0}
                       />
