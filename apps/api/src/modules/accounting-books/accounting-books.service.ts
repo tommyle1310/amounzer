@@ -138,6 +138,15 @@ export class AccountingBooksService {
     const entries = await this.prisma.journalEntry.findMany({
       where,
       include: {
+        voucher: {
+          select: {
+            voucherType: true,
+            voucherNumber: true,
+            counterpartyName: true,
+            counterpartyId: true,
+            counterpartyType: true,
+          },
+        },
         lines: {
           include: { account: { select: { code: true, name: true } } },
           orderBy: { lineOrder: 'asc' },

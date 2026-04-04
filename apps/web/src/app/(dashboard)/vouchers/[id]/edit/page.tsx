@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo, useEffect } from 'react';
+import { use, useState, useCallback, useMemo, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQuery, useMutation } from '@tanstack/react-query';
@@ -20,7 +20,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Plus, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
+import { Plus, Trash2, ChevronDown, ChevronUp, ArrowLeft } from 'lucide-react';
 
 interface Account {
   id: string;
@@ -45,6 +45,40 @@ interface JournalLine {
   creditAmount: number;
 }
 
+interface VoucherDetail {
+  id: string;
+  voucherNumber: string;
+  voucherType: VoucherTypeCode;
+  date: string;
+  counterpartyName: string | null;
+  counterpartyId: string | null;
+  description: string;
+  totalAmount: number;
+  status: 'DRAFT' | 'POSTED' | 'VOIDED';
+  fiscalYearId: string;
+  voucherBookNo?: string | null;
+  partyFullName?: string | null;
+  partyAddress?: string | null;
+  partyTaxCode?: string | null;
+  partyIdNumber?: string | null;
+  amountInWords?: string | null;
+  currency?: string | null;
+  originalAmount?: number | null;
+  exchangeRate?: number | null;
+  attachmentCount?: number | null;
+  originalDocRefs?: string | null;
+  journalEntry?: {
+    lines: Array<{
+      id: string;
+      accountId: string;
+      account: { id: string; code: string; name: string };
+      description: string | null;
+      debitAmount: number;
+      creditAmount: number;
+    }>;
+  } | null;
+}
+
 const emptyLine = (): JournalLine => ({
   accountId: '',
   accountQuery: '',
@@ -53,7 +87,6 @@ const emptyLine = (): JournalLine => ({
   creditAmount: 0,
 });
 
-// Currency options for foreign currency support
 const CURRENCIES = [
   { code: 'VND', name: 'Việt Nam Đồng' },
   { code: 'USD', name: 'US Dollar' },
@@ -62,9 +95,11 @@ const CURRENCIES = [
   { code: 'CNY', name: 'Chinese Yuan' },
 ];
 
-export default function NewVoucherPage() {
+export default function EditVoucherPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
   const router = useRouter();
   const { company } = useAuth();
+  
   const [voucherType, setVoucherType] = useState<VoucherTypeCode>('PT');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]!);
   const [counterpartyQuery, setCounterpartyQuery] = useState('');
@@ -95,6 +130,55 @@ export default function NewVoucherPage() {
   const [currency, setCurrency] = useState('VND');
   const [originalAmount, setOriginalAmount] = useState<number | ''>('');
   const [exchangeRate, setExchangeRate] = useState<number>(1);
+
+  // Fetch existing voucher
+  const { data: voucher, isLoading: isLoadingVoucher } = useQuery<VoucherDetail>({
+    queryKey: ['voucher', id],
+    queryFn: () => apiClient.get(`/vouchers/${id}`),
+  });
+
+  // Pre-populate form when voucher data loads
+  useEffect(() => {
+    if (!voucher) return;
+    
+    setVoucherType(voucher.voucherType);
+    setDate(new Date(voucher.date).toISOString().split('T')[0]!);
+    setCounterpartyId(voucher.counterpartyId ?? '');
+    setCounterpartyName(voucher.counterpartyName ?? '');
+    setCounterpartyQuery(voucher.counterpartyName ?? '');
+    setDescription(voucher.description);
+    
+    // Legal fields
+    setVoucherBookNo(voucher.voucherBookNo ?? '');
+    setPartyFullName(voucher.partyFullName ?? '');
+    setPartyAddress(voucher.partyAddress ?? '');
+    setPartyTaxCode(voucher.partyTaxCode ?? '');
+    setPartyIdNumber(voucher.partyIdNumber ?? '');
+    setAmountInWords(voucher.amountInWords ?? '');
+    setAttachmentCount(voucher.attachmentCount ?? 0);
+    setOriginalDocRefs(voucher.originalDocRefs ?? '');
+    
+    // Foreign currency
+    setCurrency(voucher.currency ?? 'VND');
+    setOriginalAmount(voucher.originalAmount ?? '');
+    setExchangeRate(voucher.exchangeRate ?? 1);
+    
+    // Show legal fields if any are filled
+    if (voucher.partyFullName || voucher.partyAddress || voucher.partyTaxCode || voucher.partyIdNumber) {
+      setShowLegalFields(true);
+    }
+    
+    // Journal lines
+    if (voucher.journalEntry?.lines && voucher.journalEntry.lines.length > 0) {
+      setLines(voucher.journalEntry.lines.map(line => ({
+        accountId: line.accountId,
+        accountQuery: `${line.account.code} - ${line.account.name}`,
+        description: line.description ?? '',
+        debitAmount: line.debitAmount,
+        creditAmount: line.creditAmount,
+      })));
+    }
+  }, [voucher]);
 
   // Fetch fiscal years for the company
   const { data: fiscalYears = [] } = useQuery<FiscalYear[]>({
@@ -132,7 +216,7 @@ export default function NewVoucherPage() {
       ),
     enabled: debouncedAccountQuery.length >= 1,
     staleTime: 0,
-    gcTime: 30_000, // 30 seconds cache
+    gcTime: 30_000,
   });
 
   // Counterparty search (customers + vendors)
@@ -153,10 +237,10 @@ export default function NewVoucherPage() {
     ...(vendorsData?.data ?? []).map((v) => ({ ...v, type: 'vendor' as const })),
   ];
 
-  const createMutation = useMutation({
-    mutationFn: (payload: unknown) => apiClient.post('/vouchers', payload),
-    onSuccess: () => router.push('/vouchers'),
-    onError: (err) => setError(err instanceof Error ? err.message : 'Lỗi tạo chứng từ'),
+  const updateMutation = useMutation({
+    mutationFn: (payload: unknown) => apiClient.patch(`/vouchers/${id}`, payload),
+    onSuccess: () => router.push(`/vouchers/${id}`),
+    onError: (err) => setError(err instanceof Error ? err.message : 'Lỗi cập nhật chứng từ'),
   });
 
   const updateLine = useCallback((index: number, field: keyof JournalLine, value: string | number) => {
@@ -188,7 +272,6 @@ export default function NewVoucherPage() {
         setCounterpartyId(cp.id);
         setCounterpartyName(cp.name);
         setCounterpartyQuery(cp.name);
-        // Auto-fill legal fields if available
         if (cp.taxCode) {
           setPartyTaxCode(cp.taxCode);
         }
@@ -251,13 +334,6 @@ export default function NewVoucherPage() {
     }
   }, [totalDebit, currency, originalAmount, amountInWordsOverride]);
 
-  // Auto-fill partyFullName from counterparty when selected
-  useEffect(() => {
-    if (counterpartyName && !partyFullName) {
-      setPartyFullName(counterpartyName);
-    }
-  }, [counterpartyName, partyFullName]);
-
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!currentFiscalYear) {
@@ -274,9 +350,8 @@ export default function NewVoucherPage() {
       return;
     }
     setError('');
-    // Use counterpartyQuery as fallback name if user typed but didn't select from dropdown
     const finalCounterpartyName = counterpartyName || counterpartyQuery || undefined;
-    createMutation.mutate({
+    updateMutation.mutate({
       voucherType,
       date: new Date(date).toISOString(),
       voucherBookNo: voucherBookNo || undefined,
@@ -312,9 +387,57 @@ export default function NewVoucherPage() {
     });
   }
 
+  if (isLoadingVoucher) {
+    return (
+      <div className="flex h-64 items-center justify-center">
+        <div className="text-muted-foreground">Đang tải...</div>
+      </div>
+    );
+  }
+
+  if (!voucher) {
+    return (
+      <div className="mx-auto max-w-5xl space-y-6">
+        <Button variant="ghost" size="sm" asChild>
+          <Link href="/vouchers">
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Quay lại
+          </Link>
+        </Button>
+        <div className="flex h-64 items-center justify-center">
+          <div className="text-destructive">Không tìm thấy chứng từ</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (voucher.status !== 'DRAFT') {
+    return (
+      <div className="mx-auto max-w-5xl space-y-6">
+        <Button variant="ghost" size="sm" asChild>
+          <Link href={`/vouchers/${id}`}>
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Quay lại
+          </Link>
+        </Button>
+        <div className="rounded-md bg-destructive/10 p-4 text-sm text-destructive">
+          Chỉ có thể sửa chứng từ ở trạng thái Nháp. Chứng từ này đã được {voucher.status === 'POSTED' ? 'ghi sổ' : 'hủy'}.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-5xl space-y-6">
-      <h1 className="text-2xl font-bold">Tạo chứng từ mới</h1>
+      <div className="flex items-center gap-4">
+        <Button variant="ghost" size="sm" asChild>
+          <Link href={`/vouchers/${id}`}>
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Quay lại
+          </Link>
+        </Button>
+        <h1 className="text-2xl font-bold">Sửa chứng từ {voucher.voucherNumber}</h1>
+      </div>
 
       {noFiscalYearAtAll && (
         <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
@@ -388,7 +511,6 @@ export default function NewVoucherPage() {
                         setCounterpartyId(cp.id);
                         setCounterpartyName(cp.name);
                         setCounterpartyQuery(cp.name);
-                        // Auto-fill legal fields if available
                         if (cp.taxCode) {
                           setPartyTaxCode(cp.taxCode);
                         }
@@ -477,14 +599,14 @@ export default function NewVoucherPage() {
                   placeholder="Mã số thuế"
                 />
               </div>
-              {/* <div className="space-y-2">
+              <div className="space-y-2">
                 <Label>CMND/CCCD</Label>
                 <Input
                   value={partyIdNumber}
                   onChange={(e) => setPartyIdNumber(e.target.value)}
                   placeholder="Số CMND/CCCD/Hộ chiếu"
                 />
-              </div> */}
+              </div>
 
               {/* Override Amount in Words - Optional */}
               <div className="space-y-2 sm:col-span-2 lg:col-span-4">
@@ -648,7 +770,6 @@ export default function NewVoucherPage() {
                                 onClick={() => {
                                   updateLine(idx, 'accountId', acc.id);
                                   updateLine(idx, 'accountQuery', `${acc.code} - ${acc.name}`);
-                                  // Auto-fill description if empty
                                   if (!line.description) {
                                     updateLine(idx, 'description', acc.name);
                                   }
@@ -755,11 +876,11 @@ export default function NewVoucherPage() {
         </Card>
 
         <div className="mt-4 flex justify-end gap-2">
-          <Button type="button" variant="outline" onClick={() => router.push('/vouchers')}>
+          <Button type="button" variant="outline" onClick={() => router.push(`/vouchers/${id}`)}>
             Hủy
           </Button>
-          <Button type="submit" disabled={createMutation.isPending || !isBalanced || !currentFiscalYear}>
-            {createMutation.isPending ? 'Đang lưu...' : 'Lưu nháp'}
+          <Button type="submit" disabled={updateMutation.isPending || !isBalanced || !currentFiscalYear}>
+            {updateMutation.isPending ? 'Đang lưu...' : 'Cập nhật'}
           </Button>
         </div>
       </form>

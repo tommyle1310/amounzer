@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { formatVND } from '@amounzer/shared';
+import { formatVND, formatVNDOrDash } from '@amounzer/shared';
 import { apiClient } from '@/lib/api-client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,7 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { FileText, Download, BarChart3, Calculator, X, Loader2 } from 'lucide-react';
+import { FileText, Download, BarChart3, Calculator, X, Loader2, ChevronRight, ChevronDown } from 'lucide-react';
 
 interface ReportItem {
   code?: string;
@@ -33,6 +33,13 @@ interface ReportItem {
 
 // Map reports to their API endpoints
 const financialReports: ReportItem[] = [
+  {
+    code: '',
+    label: 'Bảng cân đối số phát sinh',
+    description: 'Số dư đầu kỳ, phát sinh, số dư cuối kỳ',
+    apiEndpoint: 'trial-balance',
+    queryParams: (year) => ({ startDate: `${year}-01-01`, endDate: `${year}-12-31` }),
+  },
   {
     code: 'B01-DN',
     label: 'Bảng cân đối kế toán',
@@ -118,6 +125,269 @@ function toNumber(val: unknown): number {
     return (val as { toNumber: () => number }).toNumber();
   }
   return 0;
+}
+
+// Trial Balance Account interface
+interface TrialBalanceAccount {
+  code: string;
+  name: string;
+  level?: number;
+  parentId?: string | null;
+  openingDebit: unknown;
+  openingCredit: unknown;
+  periodDebit: unknown;
+  periodCredit: unknown;
+  closingDebit: unknown;
+  closingCredit: unknown;
+  children?: TrialBalanceAccount[];
+}
+
+// Trial Balance Account Row with expand/collapse
+function TrialBalanceAccountRow({
+  account,
+  level,
+}: {
+  account: TrialBalanceAccount;
+  level: number;
+}) {
+  const [expanded, setExpanded] = useState(level < 2);
+  const hasChildren = account.children && account.children.length > 0;
+
+  return (
+    <>
+      <TableRow className={level === 0 ? 'bg-muted/20 font-medium' : level === 1 ? 'bg-muted/10' : ''}>
+        <TableCell className="font-mono text-xs text-center border-r">
+          <div className="flex items-center justify-center gap-1" style={{ paddingLeft: `${level * 12}px` }}>
+            <button
+              onClick={() => setExpanded(!expanded)}
+              className="flex h-4 w-4 shrink-0 items-center justify-center"
+            >
+              {hasChildren ? (
+                expanded ? (
+                  <ChevronDown className="h-3 w-3" />
+                ) : (
+                  <ChevronRight className="h-3 w-3" />
+                )
+              ) : (
+                <span className="h-3 w-3" />
+              )}
+            </button>
+            <span>{account.code}</span>
+          </div>
+        </TableCell>
+        <TableCell className="text-xs border-r" style={{ paddingLeft: `${level * 12 + 16}px` }}>
+          {account.name}
+        </TableCell>
+        <TableCell className="text-right font-mono text-xs">
+          {formatVNDOrDash(toNumber(account.openingDebit))}
+        </TableCell>
+        <TableCell className="text-right font-mono text-xs border-r">
+          {formatVNDOrDash(toNumber(account.openingCredit))}
+        </TableCell>
+        <TableCell className="text-right font-mono text-xs">
+          {formatVNDOrDash(toNumber(account.periodDebit))}
+        </TableCell>
+        <TableCell className="text-right font-mono text-xs border-r">
+          {formatVNDOrDash(toNumber(account.periodCredit))}
+        </TableCell>
+        <TableCell className="text-right font-mono text-xs">
+          {formatVNDOrDash(toNumber(account.closingDebit))}
+        </TableCell>
+        <TableCell className="text-right font-mono text-xs">
+          {formatVNDOrDash(toNumber(account.closingCredit))}
+        </TableCell>
+      </TableRow>
+      {expanded && hasChildren && account.children!.map((child) => (
+        <TrialBalanceAccountRow key={child.code} account={child} level={level + 1} />
+      ))}
+    </>
+  );
+}
+
+// Build tree structure from flat list
+function buildTrialBalanceTree(accounts: TrialBalanceAccount[]): TrialBalanceAccount[] {
+  if (accounts.length === 0) return [];
+
+  // Create a map to track parent accounts and their aggregated values
+  const parentMap = new Map<string, {
+    code: string;
+    name: string;
+    openingDebit: number;
+    openingCredit: number;
+    periodDebit: number;
+    periodCredit: number;
+    closingDebit: number;
+    closingCredit: number;
+    children: TrialBalanceAccount[];
+  }>();
+
+  const accountMap = new Map<string, TrialBalanceAccount>();
+  const tree: TrialBalanceAccount[] = [];
+
+  // First pass: identify accounts that need parents and create parent stubs
+  accounts.forEach(acc => {
+    accountMap.set(acc.code, { ...acc, children: [] });
+
+    // Check if this account needs a parent (has - in code like 131-0001)
+    if (acc.code.includes('-')) {
+      const parentCode = acc.code.split('-')[0]!;
+      
+      // Create parent if it doesn't exist
+      if (!parentMap.has(parentCode)) {
+        parentMap.set(parentCode, {
+          code: parentCode,
+          name: getParentAccountName(parentCode, acc.name),
+          openingDebit: 0,
+          openingCredit: 0,
+          periodDebit: 0,
+          periodCredit: 0,
+          closingDebit: 0,
+          closingCredit: 0,
+          children: [],
+        });
+      }
+      
+      // Aggregate values to parent
+      const parent = parentMap.get(parentCode)!;
+      parent.openingDebit += toNumber(acc.openingDebit);
+      parent.openingCredit += toNumber(acc.openingCredit);
+      parent.periodDebit += toNumber(acc.periodDebit);
+      parent.periodCredit += toNumber(acc.periodCredit);
+      parent.closingDebit += toNumber(acc.closingDebit);
+      parent.closingCredit += toNumber(acc.closingCredit);
+    }
+  });
+
+  // Second pass: build tree structure
+  accounts.forEach(acc => {
+    const node = accountMap.get(acc.code);
+    if (!node) return;
+
+    if (acc.code.includes('-')) {
+      const parentCode = acc.code.split('-')[0]!;
+      const parent = parentMap.get(parentCode);
+      
+      if (parent) {
+        parent.children.push(node);
+      } else {
+        tree.push(node);
+      }
+    } else {
+      // Standalone account without sub-accounts
+      tree.push(node);
+    }
+  });
+
+  // Add parent accounts to tree
+  parentMap.forEach(parent => {
+    tree.push(parent as TrialBalanceAccount);
+  });
+
+  // Sort tree by account code
+  tree.sort((a, b) => a.code.localeCompare(b.code));
+
+  return tree;
+}
+
+// Helper function to extract parent account name
+function getParentAccountName(parentCode: string, childName: string): string {
+  // Extract base name from child (e.g., "Phải thu của khách hàng - Cty ABC" -> "Phải thu của khách hàng")
+  const baseNames: Record<string, string> = {
+    '131': 'Phải thu của khách hàng',
+    '331': 'Phải trả người bán',
+    '138': 'Phải thu khác',
+    '141': 'Trả trước cho người bán',
+    '112': 'Tiền gửi ngân hàng',
+    '156': 'Hàng hóa',
+    '333': 'Thuế và các khoản phải nộp Nhà Nước',
+    '334': 'Phải trả cho người lao động',
+    '338': 'Phải trả, phải nộp khác',
+  };
+  
+  return baseNames[parentCode] || parentCode;
+}
+
+// Trial Balance Report View
+function TrialBalanceView({ data }: { data: Record<string, unknown> }) {
+  const accountsFlat = (data.lines || []) as TrialBalanceAccount[];
+  // Always build tree from flat list to ensure proper parent-child relationships
+  const accountsTree = buildTrialBalanceTree(accountsFlat);
+
+  const totals = data.totals as {
+    openingDebit: unknown;
+    openingCredit: unknown;
+    periodDebit: unknown;
+    periodCredit: unknown;
+    closingDebit: unknown;
+    closingCredit: unknown;
+  } | undefined;
+
+  return (
+    <div className="space-y-4">
+      <div className="text-center">
+        <h2 className="text-lg font-bold">BẢNG CÂN ĐỐI SỐ PHÁT SINH</h2>
+        <p className="text-sm text-muted-foreground">
+          Từ ngày {data.startDate as string} đến ngày {data.endDate as string}
+        </p>
+      </div>
+
+      <div className="overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead rowSpan={2} className="text-center border-r">SHTK</TableHead>
+              <TableHead rowSpan={2} className="border-r">TÊN TÀI KHOẢN</TableHead>
+              <TableHead colSpan={2} className="text-center border-r">SỐ DƯ ĐẦU KỲ</TableHead>
+              <TableHead colSpan={2} className="text-center border-r">PHÁT SINH TRONG KỲ</TableHead>
+              <TableHead colSpan={2} className="text-center">SỐ DƯ CUỐI KỲ</TableHead>
+            </TableRow>
+            <TableRow>
+              <TableHead className="text-right text-xs">Nợ</TableHead>
+              <TableHead className="text-right text-xs border-r">Có</TableHead>
+              <TableHead className="text-right text-xs">Nợ</TableHead>
+              <TableHead className="text-right text-xs border-r">Có</TableHead>
+              <TableHead className="text-right text-xs">Nợ</TableHead>
+              <TableHead className="text-right text-xs">Có</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {accountsTree.map((acc) => (
+              <TrialBalanceAccountRow key={acc.code} account={acc} level={0} />
+            ))}
+            {totals && (
+              <TableRow className="font-semibold bg-muted/30">
+                <TableCell colSpan={2} className="text-xs border-r">Tổng cộng</TableCell>
+                <TableCell className="text-right font-mono text-xs">
+                  {formatVNDOrDash(toNumber(totals.openingDebit))}
+                </TableCell>
+                <TableCell className="text-right font-mono text-xs border-r">
+                  {formatVNDOrDash(toNumber(totals.openingCredit))}
+                </TableCell>
+                <TableCell className="text-right font-mono text-xs">
+                  {formatVNDOrDash(toNumber(totals.periodDebit))}
+                </TableCell>
+                <TableCell className="text-right font-mono text-xs border-r">
+                  {formatVNDOrDash(toNumber(totals.periodCredit))}
+                </TableCell>
+                <TableCell className="text-right font-mono text-xs">
+                  {formatVNDOrDash(toNumber(totals.closingDebit))}
+                </TableCell>
+                <TableCell className="text-right font-mono text-xs">
+                  {formatVNDOrDash(toNumber(totals.closingCredit))}
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </div>
+
+      {accountsTree.length === 0 && (
+        <div className="text-center text-amber-600 text-sm mt-2">
+          💡 Chưa có dữ liệu. Tạo chứng từ và ghi sổ để thấy báo cáo.
+        </div>
+      )}
+    </div>
+  );
 }
 
 // Balance Sheet Report View
@@ -438,6 +708,8 @@ export default function ReportsPage() {
     const data = reportData as Record<string, unknown>;
 
     switch (viewingReport.apiEndpoint) {
+      case 'trial-balance':
+        return <TrialBalanceView data={data} />;
       case 'balance-sheet':
         return <BalanceSheetView data={data} />;
       case 'income-statement':

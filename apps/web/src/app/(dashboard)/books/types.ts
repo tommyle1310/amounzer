@@ -50,6 +50,14 @@ export interface JournalEntry {
   totalDebit: string | number;
   totalCredit: string | number;
   lines: JournalEntryLine[];
+  voucher?: {
+    voucherType: string;
+    voucherNumber: string;
+    counterpartyName?: string | null;
+    customer?: { name: string; taxCode?: string; address?: string } | null;
+    vendor?: { name: string; taxCode?: string; address?: string } | null;
+    employee?: { name: string; taxCode?: string; address?: string } | null;
+  } | null;
 }
 
 export interface LedgerAccount {

@@ -57,6 +57,7 @@ interface VoucherDetail {
   voucherBookNo?: string | null;
   partyFullName?: string | null;
   partyAddress?: string | null;
+  partyTaxCode?: string | null;
   partyIdNumber?: string | null;
   amountInWords?: string | null;
   currency?: string | null;
@@ -211,6 +212,12 @@ export default function VoucherDetailPage({ params }: { params: Promise<{ id: st
               <div className="sm:col-span-2">
                 <dt className="text-sm font-medium text-muted-foreground">Địa chỉ</dt>
                 <dd className="text-sm">{voucher.partyAddress}</dd>
+              </div>
+            )}
+            {voucher.partyTaxCode && (
+              <div>
+                <dt className="text-sm font-medium text-muted-foreground">Mã số thuế (MST)</dt>
+                <dd className="text-sm">{voucher.partyTaxCode}</dd>
               </div>
             )}
             {voucher.partyIdNumber && (

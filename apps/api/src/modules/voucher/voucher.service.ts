@@ -31,6 +31,7 @@ interface CreateVoucherData {
   counterpartyType?: string;
   partyFullName?: string;       // Họ tên người nộp/nhận tiền
   partyAddress?: string;        // Địa chỉ
+  partyTaxCode?: string;        // Mã số thuế
   partyIdNumber?: string;       // CMND/CCCD
   
   // Alternative partner fields (will be mapped to counterparty)
@@ -38,7 +39,6 @@ interface CreateVoucherData {
   vendorId?: string;
   employeeId?: string;
   partyName?: string;          // Alias for counterpartyName
-  partyTaxCode?: string;       // For reference
   
   description: string;
   totalAmount: number;
@@ -137,6 +137,7 @@ export class VoucherService {
         counterpartyType,
         partyFullName: data.partyFullName ?? counterpartyName,
         partyAddress: data.partyAddress,
+        partyTaxCode: data.partyTaxCode,
         partyIdNumber: data.partyIdNumber,
         
         description: data.description,
@@ -214,6 +215,166 @@ export class VoucherService {
     );
 
     return { ...voucher, journalEntry };
+  }
+
+  async update(companyId: string, id: string, data: Partial<CreateVoucherData>, userId: string) {
+    // Fetch existing voucher
+    const existingVoucher = await this.prisma.voucher.findFirst({
+      where: { id, companyId },
+    });
+    if (!existingVoucher) {
+      throw new NotFoundException('Voucher not found');
+    }
+    if (existingVoucher.status !== 'DRAFT') {
+      throw new BadRequestException('Chỉ có thể sửa chứng từ ở trạng thái Nháp');
+    }
+
+    // Validate fiscal year if provided
+    if (data.fiscalYearId) {
+      const fiscalYear = await this.prisma.fiscalYear.findFirst({
+        where: { id: data.fiscalYearId, companyId },
+      });
+      if (!fiscalYear) {
+        throw new NotFoundException('Năm tài chính không tồn tại');
+      }
+      if (fiscalYear.status === 'CLOSED') {
+        throw new BadRequestException('Năm tài chính đã đóng');
+      }
+    }
+
+    // Map alternative partner fields to counterparty fields
+    let counterpartyId = data.counterpartyId;
+    let counterpartyType = data.counterpartyType;
+    let counterpartyName = data.counterpartyName ?? data.partyName;
+
+    if (!counterpartyId && (data.customerId || data.vendorId || data.employeeId)) {
+      if (data.customerId) {
+        counterpartyId = data.customerId;
+        counterpartyType = 'customer';
+      } else if (data.vendorId) {
+        counterpartyId = data.vendorId;
+        counterpartyType = 'vendor';
+      } else if (data.employeeId) {
+        counterpartyId = data.employeeId;
+        counterpartyType = 'employee';
+      }
+    }
+
+    // Auto-generate amount in words if totalAmount is provided but amountInWords is not
+    let amountInWords = data.amountInWords;
+    if (data.totalAmount !== undefined && !data.amountInWords) {
+      const currency = data.currency || existingVoucher.currency || 'VND';
+      const amountForWords = currency === 'VND' ? data.totalAmount : (data.originalAmount ?? data.totalAmount);
+      const currencyWord = currency === 'VND' ? 'đồng' : currency;
+      amountInWords = numberToVietnameseWords(amountForWords, currencyWord);
+    }
+
+    // Prepare update data
+    const updateData: Prisma.VoucherUpdateInput = {};
+    if (data.voucherType !== undefined) updateData.voucherType = data.voucherType;
+    if (data.date !== undefined) updateData.date = new Date(data.date);
+    if (data.recordingDate !== undefined) updateData.recordingDate = new Date(data.recordingDate);
+    if (data.voucherBookNo !== undefined) updateData.voucherBookNo = data.voucherBookNo;
+    if (counterpartyName !== undefined) updateData.counterpartyName = counterpartyName;
+    if (counterpartyId !== undefined) updateData.counterpartyId = counterpartyId;
+    if (counterpartyType !== undefined) updateData.counterpartyType = counterpartyType;
+    if (data.partyFullName !== undefined) updateData.partyFullName = data.partyFullName;
+    if (data.partyAddress !== undefined) updateData.partyAddress = data.partyAddress;
+    if (data.partyTaxCode !== undefined) updateData.partyTaxCode = data.partyTaxCode;
+    if (data.partyIdNumber !== undefined) updateData.partyIdNumber = data.partyIdNumber;
+    if (data.description !== undefined) updateData.description = data.description;
+    if (data.totalAmount !== undefined) updateData.totalAmount = data.totalAmount;
+    if (amountInWords !== undefined) updateData.amountInWords = amountInWords;
+    if (data.currency !== undefined) updateData.currency = data.currency;
+    if (data.originalAmount !== undefined) updateData.originalAmount = data.originalAmount;
+    if (data.exchangeRate !== undefined) updateData.exchangeRate = data.exchangeRate;
+    if (data.attachmentCount !== undefined) updateData.attachmentCount = data.attachmentCount;
+    if (data.originalDocRefs !== undefined) updateData.originalDocRefs = data.originalDocRefs;
+    if (data.customFieldValues !== undefined) {
+      updateData.customFieldValues = data.customFieldValues as Prisma.InputJsonValue | undefined;
+    }
+
+    // Update the voucher
+    const updatedVoucher = await this.prisma.voucher.update({
+      where: { id },
+      data: updateData,
+    });
+
+    // If lines are provided, update the journal entry
+    let journalEntry;
+    if (data.lines && existingVoucher.journalEntryId) {
+      // Delete old lines
+      await this.prisma.journalEntryLine.deleteMany({
+        where: { journalEntryId: existingVoucher.journalEntryId },
+      });
+
+      // Create new lines
+      await this.prisma.journalEntryLine.createMany({
+        data: data.lines.map((line, index) => ({
+          journalEntryId: existingVoucher.journalEntryId!,
+          accountId: line.accountId,
+          description: line.description,
+          debitAmount: line.debitAmount,
+          creditAmount: line.creditAmount,
+          lineOrder: index + 1,
+          customerId: line.customerId,
+          vendorId: line.vendorId,
+        })),
+      });
+
+      // Update journal entry description if needed
+      const jeDescription = `${updatedVoucher.voucherType} ${updatedVoucher.voucherNumber}: ${updatedVoucher.description}`;
+      await this.prisma.journalEntry.update({
+        where: { id: existingVoucher.journalEntryId },
+        data: {
+          postingDate: data.recordingDate ? new Date(data.recordingDate) : data.date ? new Date(data.date) : undefined,
+          documentDate: data.date ? new Date(data.date) : undefined,
+          description: jeDescription,
+        },
+      });
+
+      // Fetch updated journal entry
+      journalEntry = await this.prisma.journalEntry.findUnique({
+        where: { id: existingVoucher.journalEntryId },
+        include: {
+          lines: {
+            include: {
+              account: { select: { id: true, code: true, name: true } },
+              customer: { select: { id: true, code: true, name: true } },
+              vendor: { select: { id: true, code: true, name: true } },
+            },
+            orderBy: { lineOrder: 'asc' },
+          },
+        },
+      });
+    } else if (existingVoucher.journalEntryId) {
+      // Fetch existing journal entry
+      journalEntry = await this.prisma.journalEntry.findUnique({
+        where: { id: existingVoucher.journalEntryId },
+        include: {
+          lines: {
+            include: {
+              account: { select: { id: true, code: true, name: true } },
+              customer: { select: { id: true, code: true, name: true } },
+              vendor: { select: { id: true, code: true, name: true } },
+            },
+            orderBy: { lineOrder: 'asc' },
+          },
+        },
+      });
+    }
+
+    await this.auditService.create(
+      companyId,
+      userId,
+      'UPDATE',
+      'Voucher',
+      id,
+      existingVoucher as unknown as Record<string, unknown>,
+      updatedVoucher as unknown as Record<string, unknown>,
+    );
+
+    return { ...updatedVoucher, journalEntry };
   }
 
   async findAll(

@@ -41,7 +41,8 @@ export const BOOK_API_MAP: Record<string, string> = {
 // ── Column Width Presets ─────────────────────────────────────────────────────
 
 export const COLUMN_WIDTHS = {
-  generalJournal: [48, 90, 90, 110, 220, 40, 96, 110, 110],
+  generalJournal: [48, 90, 90, 110, 150, 100, 180, 180, 40, 96, 110, 110],
+  generalJournalSimplified: [48, 100, 90, 180, 100, 200, 90, 90, 110],
   generalLedger: [56, 90, 90, 110, 200, 80, 110, 110, 110],
   cashBook: [90, 90, 100, 100, 160, 120, 80, 100, 100, 110],
   genericLedger: [90, 100, 200, 80, 120, 100, 100, 110],

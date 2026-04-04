@@ -140,7 +140,9 @@ export class CompanyService {
       const currentStart = new Date(startDate);
       for (let i = 1; i <= 12; i++) {
         const periodStart = new Date(currentStart);
+        // Get last day of month, set to end of day (23:59:59.999) to include full day
         const periodEnd = new Date(currentStart.getFullYear(), currentStart.getMonth() + 1, 0);
+        periodEnd.setHours(23, 59, 59, 999);
 
         // Clamp the last period to not exceed fiscal year end
         if (periodEnd > endDate) {

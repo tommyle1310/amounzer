@@ -252,6 +252,7 @@ model JournalEntry {
 
   lines                JournalEntryLine[]
   accountingTransaction AccountingTransaction?
+  voucher              Voucher?
 
   @@unique([companyId, entryNumber])
   @@index([companyId, fiscalYearId, status])
@@ -404,6 +405,7 @@ model Voucher {
   counterpartyType String?       // 'customer' or 'vendor'
   partyFullName    String?       // Họ tên người nộp tiền / nhận tiền (required for legal docs)
   partyAddress     String?       // Địa chỉ người giao dịch
+  partyTaxCode     String?       // Mã số thuế
   partyIdNumber    String?       // CMND/CCCD/Hộ chiếu
 
   description      String        // Lý do / Nội dung
@@ -422,7 +424,7 @@ model Voucher {
   originalDocRefs  String?       // Chứng từ gốc references (JSON or comma-separated)
 
   status           VoucherStatus @default(DRAFT)
-  journalEntryId   String?
+  journalEntryId   String?       @unique
   reversalVoucherId String?
   postedAt         DateTime?
   postedById       String?
@@ -431,6 +433,7 @@ model Voucher {
   updatedAt        DateTime      @updatedAt
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  journalEntry JournalEntry? @relation(fields: [journalEntryId], references: [id])
 
   @@unique([companyId, voucherType, voucherNumber])
   @@index([companyId, date])

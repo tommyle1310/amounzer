@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Body,
   Param,
   Query,
@@ -35,6 +36,7 @@ export class VoucherController {
       counterpartyType?: string;
       partyFullName?: string;
       partyAddress?: string;
+      partyTaxCode?: string;
       partyIdNumber?: string;
       
       description: string;
@@ -63,6 +65,55 @@ export class VoucherController {
     },
   ) {
     return this.voucherService.create(req.companyId, body, req.user.sub);
+  }
+
+  @Patch(':id')
+  @Roles('ADMIN', 'ACCOUNTANT')
+  async update(
+    @Request() req: { companyId: string; user: { sub: string } },
+    @Param('id') id: string,
+    @Body()
+    body: {
+      voucherType?: 'PT' | 'PC' | 'BDN' | 'BCN' | 'BT' | 'CTGS';
+      date?: string;
+      recordingDate?: string;
+      voucherBookNo?: string;
+      
+      // Transaction party info (TT200/TT133)
+      counterpartyName?: string;
+      counterpartyId?: string;
+      counterpartyType?: string;
+      partyFullName?: string;
+      partyAddress?: string;
+      partyTaxCode?: string;
+      partyIdNumber?: string;
+      
+      description?: string;
+      totalAmount?: number;
+      amountInWords?: string;
+      
+      // Foreign currency
+      currency?: string;
+      originalAmount?: number;
+      exchangeRate?: number;
+      
+      // Supporting documents
+      attachmentCount?: number;
+      originalDocRefs?: string;
+      
+      fiscalYearId?: string;
+      lines?: Array<{
+        accountId: string;
+        description?: string;
+        debitAmount: number;
+        creditAmount: number;
+        customerId?: string;
+        vendorId?: string;
+      }>;
+      customFieldValues?: Record<string, unknown>;
+    },
+  ) {
+    return this.voucherService.update(req.companyId, id, body, req.user.sub);
   }
 
   @Get()

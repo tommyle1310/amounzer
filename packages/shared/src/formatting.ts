@@ -1,13 +1,13 @@
 /**
- * Format a number as VND currency (no decimals, dot thousand separator).
- * E.g., 1000000 → "1.000.000"
+ * Format a number as VND currency (no decimals, comma thousand separator).
+ * E.g., 1000000 → "1,000,000"
  */
 export function formatVND(amount: number | bigint | string): string {
   const num = typeof amount === 'string' ? parseFloat(amount) : Number(amount);
   if (isNaN(num)) return '0';
   return Math.round(num)
     .toString()
-    .replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    .replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
 /**
@@ -41,24 +41,35 @@ export function formatDateVNLegal(date: Date | string): string {
 }
 
 /**
- * Format a Vietnamese number (dot as thousand separator, comma as decimal).
- * E.g., 1234567.89 → "1.234.567,89"
+ * Format a Vietnamese number (comma as thousand separator, dot as decimal).
+ * E.g., 1234567.89 → "1,234,567.89"
  */
 export function formatNumberVN(value: number, decimals = 0): string {
   const parts = value.toFixed(decimals).split('.');
-  const intPart = parts[0]!.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  const intPart = parts[0]!.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   if (decimals > 0 && parts[1]) {
-    return `${intPart},${parts[1]}`;
+    return `${intPart}.${parts[1]}`;
   }
   return intPart;
 }
 
 /**
  * Parse a VND-formatted string back to a number.
- * E.g., "1.000.000" → 1000000
+ * E.g., "1,000,000" → 1000000
  */
 export function parseVND(formatted: string): number {
-  return parseInt(formatted.replace(/\./g, ''), 10) || 0;
+  return parseInt(formatted.replace(/,/g, ''), 10) || 0;
+}
+
+/**
+ * Format a number as VND, but return "-" if zero or null.
+ * E.g., 1000000 → "1,000,000", 0 → "-"
+ */
+export function formatVNDOrDash(amount: number | bigint | string | null | undefined): string {
+  if (amount == null) return '-';
+  const num = typeof amount === 'string' ? parseFloat(amount) : Number(amount);
+  if (isNaN(num) || num === 0) return '-';
+  return formatVND(num);
 }
 
 // Vietnamese number words
