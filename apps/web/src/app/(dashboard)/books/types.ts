@@ -14,6 +14,7 @@ export interface VoucherInfo {
   paymentNo: string | null;
   voucherDate: string;
   partyName: string | null;
+  description?: string | null;
 }
 
 export interface JournalEntryInfo {

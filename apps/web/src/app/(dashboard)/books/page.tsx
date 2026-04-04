@@ -130,11 +130,13 @@ function BookTabs({
       {BOOK_TYPES.map((bt) => (
         <TabsContent key={bt.key} value={bt.key}>
           <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm">{bt.label}</CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              <BookTab bookKey={bt.key} dateFrom={dateFrom} dateTo={dateTo} />
+            {bt.key !== 'general-journal' && (
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">{bt.label}</CardTitle>
+              </CardHeader>
+            )}
+            <CardContent className={bt.key === 'general-journal' ? 'p-0' : 'p-0'}>
+              <BookTab bookKey={bt.key} dateFrom={dateFrom} dateTo={dateTo} title={bt.label} />
             </CardContent>
           </Card>
         </TabsContent>

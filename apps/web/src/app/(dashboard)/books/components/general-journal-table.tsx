@@ -25,6 +25,7 @@ import { EmptyState } from './empty-state';
 interface GeneralJournalTableProps {
   data: ApiBookResponse;
   totals?: { totalDebit: string | number; totalCredit: string | number };
+  title?: string;
 }
 
 type ViewMode = 'simplified' | 'detailed';
@@ -63,7 +64,7 @@ interface SimplifiedRow {
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export function GeneralJournalTable({ data, totals }: GeneralJournalTableProps) {
+export function GeneralJournalTable({ data, totals, title }: GeneralJournalTableProps) {
   const entries = data.data as JournalEntry[];
   const [viewMode, setViewMode] = useState<ViewMode>('detailed');
   const { widths: detailedWidths, startResize: startDetailedResize } = useResizableColumns(COLUMN_WIDTHS.generalJournal);
@@ -79,8 +80,9 @@ export function GeneralJournalTable({ data, totals }: GeneralJournalTableProps) 
 
   return (
     <div>
-      {/* View Mode Toggle */}
-      <div className="flex justify-end mb-3">
+      {/* Title + View Mode Toggle */}
+      <div className="flex items-center justify-between mb-3 px-4 pt-4">
+        {title && <h3 className="text-sm font-semibold">{title}</h3>}
         <div className="inline-flex rounded-md shadow-sm" role="group">
           <Button
             type="button"
@@ -423,7 +425,8 @@ function buildDetailedRows(entries: JournalEntry[]): DetailedRow[] {
         postingDate: je.postingDate,
         documentDate: je.documentDate,
         entryNumber: je.entryNumber,
-        voucherDescription: je.description, // Nội dung chứng từ
+        // Strip voucherType prefix from description (e.g., "PC PC-2026-00001: ..." -> "PC-2026-00001: ...")
+        voucherDescription: je.description?.replace(/^[A-Z]+\s+/, '') || '', // Nội dung chứng từ
         lineDescription: line.description || '', // Diễn giải tài khoản
         taxCode,
         counterpartyName,

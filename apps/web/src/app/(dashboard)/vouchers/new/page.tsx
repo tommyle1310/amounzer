@@ -39,18 +39,20 @@ interface FiscalYear {
 
 interface JournalLine {
   accountId: string;
-  accountQuery: string;
-  description: string;
+  accountCode: string;
+  accountName: string;
   debitAmount: number;
   creditAmount: number;
+  isExpanded?: boolean;
 }
 
 const emptyLine = (): JournalLine => ({
   accountId: '',
-  accountQuery: '',
-  description: '',
+  accountCode: '',
+  accountName: '',
   debitAmount: 0,
   creditAmount: 0,
+  isExpanded: false,
 });
 
 // Currency options for foreign currency support
@@ -116,7 +118,7 @@ export default function NewVoucherPage() {
 
   // Debounce account search query (300ms)
   useEffect(() => {
-    const query = activeAccountLine !== null ? lines[activeAccountLine]?.accountQuery ?? '' : '';
+    const query = activeAccountLine !== null ? lines[activeAccountLine]?.accountCode ?? '' : '';
     const timer = setTimeout(() => {
       setDebouncedAccountQuery(query);
     }, 300);
@@ -159,7 +161,7 @@ export default function NewVoucherPage() {
     onError: (err) => setError(err instanceof Error ? err.message : 'Lỗi tạo chứng từ'),
   });
 
-  const updateLine = useCallback((index: number, field: keyof JournalLine, value: string | number) => {
+  const updateLine = useCallback((index: number, field: keyof JournalLine, value: string | number | boolean) => {
     setLines((prev) => prev.map((l, i) => (i === index ? { ...l, [field]: value } : l)));
   }, []);
 
@@ -211,7 +213,7 @@ export default function NewVoucherPage() {
   const handleAccountKeyDown = (e: React.KeyboardEvent, idx: number) => {
     if (activeAccountLine !== idx || accounts.length === 0) return;
     const line = lines[idx];
-    if (!line || line.accountQuery.length < 1) return;
+    if (!line || line.accountCode.length < 1) return;
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       setAccountHighlightIndex((prev) => (prev < accounts.length - 1 ? prev + 1 : 0));
@@ -223,10 +225,8 @@ export default function NewVoucherPage() {
       const acc = accounts[accountHighlightIndex];
       if (acc) {
         updateLine(idx, 'accountId', acc.id);
-        updateLine(idx, 'accountQuery', `${acc.code} - ${acc.name}`);
-        if (!line.description) {
-          updateLine(idx, 'description', acc.name);
-        }
+        updateLine(idx, 'accountCode', acc.code);
+        updateLine(idx, 'accountName', acc.name);
         setActiveAccountLine(null);
         setAccountHighlightIndex(-1);
       }
@@ -303,9 +303,9 @@ export default function NewVoucherPage() {
       originalDocRefs: originalDocRefs || undefined,
       
       fiscalYearId: currentFiscalYear.id,
-      lines: validLines.map(({ accountId, description: desc, debitAmount, creditAmount }) => ({
+      lines: validLines.map(({ accountId, debitAmount, creditAmount }) => ({
         accountId,
-        description: desc,
+        description, // Use voucher description for all lines
         debitAmount: Number(debitAmount) || 0,
         creditAmount: Number(creditAmount) || 0,
       })),
@@ -612,8 +612,8 @@ export default function NewVoucherPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-10">#</TableHead>
-                  <TableHead className="min-w-[200px]">Tài khoản</TableHead>
-                  <TableHead>Diễn giải</TableHead>
+                  <TableHead className="w-32">TK đối ứng</TableHead>
+                  <TableHead className="min-w-[200px]">Diễn giải (Tên TK)</TableHead>
                   <TableHead className="w-40 text-right">Nợ (₫)</TableHead>
                   <TableHead className="w-40 text-right">Có (₫)</TableHead>
                   <TableHead className="w-10" />
@@ -626,19 +626,21 @@ export default function NewVoucherPage() {
                     <TableCell>
                       <div className="relative">
                         <Input
-                          value={line.accountQuery}
+                          value={line.accountCode}
                           onChange={(e) => {
-                            updateLine(idx, 'accountQuery', e.target.value);
+                            updateLine(idx, 'accountCode', e.target.value);
+                            updateLine(idx, 'accountId', '');
+                            updateLine(idx, 'accountName', '');
                             setActiveAccountLine(idx);
                           }}
                           onFocus={() => setActiveAccountLine(idx)}
                           onBlur={() => setTimeout(() => { setActiveAccountLine(null); setAccountHighlightIndex(-1); }, 200)}
                           onKeyDown={(e) => handleAccountKeyDown(e, idx)}
-                          placeholder="Mã hoặc tên TK"
-                          className="text-sm"
+                          placeholder="Mã TK"
+                          className="text-sm font-mono w-24"
                         />
-                        {activeAccountLine === idx && accounts.length > 0 && line.accountQuery.length >= 1 && (
-                          <div className="absolute left-0 right-0 top-full z-10 mt-1 max-h-48 overflow-y-auto rounded-md border bg-background shadow-md">
+                        {activeAccountLine === idx && accounts.length > 0 && line.accountCode.length >= 1 && (
+                          <div className="absolute left-0 top-full z-10 mt-1 min-w-[300px] max-h-48 overflow-y-auto rounded-md border bg-background shadow-md">
                             {accounts.map((acc) => (
                               <button
                                 key={acc.id}
@@ -647,11 +649,8 @@ export default function NewVoucherPage() {
                                 onMouseDown={(e) => e.preventDefault()}
                                 onClick={() => {
                                   updateLine(idx, 'accountId', acc.id);
-                                  updateLine(idx, 'accountQuery', `${acc.code} - ${acc.name}`);
-                                  // Auto-fill description if empty
-                                  if (!line.description) {
-                                    updateLine(idx, 'description', acc.name);
-                                  }
+                                  updateLine(idx, 'accountCode', acc.code);
+                                  updateLine(idx, 'accountName', acc.name);
                                   setActiveAccountLine(null);
                                   setAccountHighlightIndex(-1);
                                 }}
@@ -666,12 +665,25 @@ export default function NewVoucherPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Input
-                        value={line.description}
-                        onChange={(e) => updateLine(idx, 'description', e.target.value)}
-                        placeholder="Diễn giải dòng"
-                        className="text-sm"
-                      />
+                      {line.accountName ? (
+                        <div
+                          className="text-sm cursor-pointer hover:bg-muted/50 px-2 py-1 rounded"
+                          onClick={() => updateLine(idx, 'isExpanded', !line.isExpanded)}
+                          title="Click để mở rộng"
+                        >
+                          <div className={`${line.isExpanded ? '' : 'truncate max-w-[180px]'}`}>
+                            {line.accountName}
+                          </div>
+                          {!line.isExpanded && line.accountName.length > 25 && (
+                            <ChevronDown className="inline h-3 w-3 text-muted-foreground ml-1" />
+                          )}
+                          {line.isExpanded && (
+                            <ChevronUp className="inline h-3 w-3 text-muted-foreground ml-1" />
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground text-sm italic">Chọn tài khoản</span>
+                      )}
                     </TableCell>
                     <TableCell>
                       <Input

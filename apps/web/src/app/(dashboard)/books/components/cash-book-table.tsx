@@ -31,7 +31,7 @@ interface CashRowData {
   dateCT: string;
   soPT: string;
   soPC: string;
-  dienGiai: string;
+  noiDung: string;
   doiTuong: string;
 }
 
@@ -95,7 +95,7 @@ function CashBookHeader({ startResize }: { startResize: (idx: number) => (e: Rea
           <ResizeHandle onMouseDown={startResize(3)} />
         </TableHead>
         <TableHead className="relative overflow-visible">
-          Diễn giải
+          Nội dung
           <ResizeHandle onMouseDown={startResize(4)} />
         </TableHead>
         <TableHead className="relative overflow-visible">
@@ -141,6 +141,7 @@ function CashBookLineRows({ line }: { line: JournalEntryLine }) {
   const contras = line.contraAccounts ?? [];
   const je = line.journalEntry;
   const v = line.voucher;
+  const isNeg = line.isNegativeBalance || runBal < 0;
 
   const rowData: CashRowData = {
     dateGhiSo: je?.postingDate ? formatDateVN(je.postingDate) : '',
@@ -153,19 +154,12 @@ function CashBookLineRows({ line }: { line: JournalEntryLine }) {
           : '',
     soPT: v?.receiptNo ?? '',
     soPC: v?.paymentNo ?? '',
-    dienGiai: line.description || je?.description || '',
+    noiDung: v?.description || line.description || je?.description || '',
     doiTuong: v?.partyName ?? '',
   };
 
-  // Calculate running balance for start of this voucher
-  const totalContraDebit = contras.reduce((sum, c) => sum + toNumber(c.debitAmount), 0);
-  const totalContraCredit = contras.reduce((sum, c) => sum + toNumber(c.creditAmount), 0);
-  const balanceBeforeVoucher =
-    runBal - (debit > 0 ? totalContraCredit : 0) + (credit > 0 ? totalContraDebit : 0);
-
   // Render single row if no contras
   if (contras.length === 0) {
-    const isNeg = line.isNegativeBalance || runBal < 0;
     return (
       <CashBookRow
         rowData={rowData}
@@ -179,21 +173,16 @@ function CashBookLineRows({ line }: { line: JournalEntryLine }) {
     );
   }
 
-  // Render each contra as separate row with incremental running balance
-  let accumulatedBalance = balanceBeforeVoucher;
+  // Render each contra as separate row
+  // Only show running balance on the last row to avoid confusion
   return contras.map((contra, idx) => {
     const contraDebit = toNumber(contra.debitAmount);
     const contraCredit = toNumber(contra.creditAmount);
-
-    // Update accumulated balance: Thu (cash debit) adds credit, Chi (cash credit) subtracts debit
-    if (debit > 0) {
-      accumulatedBalance += contraCredit;
-    } else {
-      accumulatedBalance -= contraDebit;
-    }
-
-    const rowBalance = accumulatedBalance;
-    const rowIsNeg = rowBalance < 0;
+    const isLastRow = idx === contras.length - 1;
+    
+    // Thu (cash debit) = contra credit, Chi (cash credit) = contra debit
+    const thu = debit > 0 ? contraCredit : 0;
+    const chi = credit > 0 ? contraDebit : 0;
 
     return (
       <CashBookRow
@@ -201,10 +190,10 @@ function CashBookLineRows({ line }: { line: JournalEntryLine }) {
         rowData={rowData}
         contraCode={contra.code}
         contraName={contra.name}
-        thu={contraCredit}
-        chi={contraDebit}
-        balance={rowBalance}
-        isNeg={rowIsNeg}
+        thu={thu}
+        chi={chi}
+        balance={isLastRow ? runBal : null}
+        isNeg={isLastRow && isNeg}
         isMultiContraFirst={idx === 0 && contras.length > 1}
       />
     );
@@ -226,7 +215,7 @@ function CashBookRow({
   contraName?: string;
   thu: number;
   chi: number;
-  balance: number;
+  balance: number | null;
   isNeg: boolean;
   isMultiContraFirst?: boolean;
 }) {
@@ -238,7 +227,7 @@ function CashBookRow({
       <TableCell className="text-xs">{rowData.dateCT}</TableCell>
       <TableCell className="font-mono text-xs">{rowData.soPT}</TableCell>
       <TableCell className="font-mono text-xs">{rowData.soPC}</TableCell>
-      <TableCell className="max-w-[160px] truncate text-xs">{rowData.dienGiai}</TableCell>
+      <TableCell className="max-w-[160px] truncate text-xs">{rowData.noiDung}</TableCell>
       <TableCell className="text-xs">{rowData.doiTuong}</TableCell>
       <TableCell className="font-mono text-xs" title={contraName || undefined}>
         {contraCode}
@@ -247,7 +236,7 @@ function CashBookRow({
       <TableCell className="text-right font-mono text-xs">{fmtAmt(chi)}</TableCell>
       <TableCell className={`text-right font-mono text-xs font-medium ${isNeg ? 'text-red-600' : ''}`}>
         {isNeg && <AlertTriangle className="inline h-3 w-3 mr-1" />}
-        {fmtBal(balance)}
+        {balance !== null ? fmtBal(balance) : ''}
       </TableCell>
     </TableRow>
   );

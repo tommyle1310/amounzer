@@ -18,11 +18,12 @@ interface BookTabProps {
   bookKey: string;
   dateFrom: string;
   dateTo: string;
+  title?: string;
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export function BookTab({ bookKey, dateFrom, dateTo }: BookTabProps) {
+export function BookTab({ bookKey, dateFrom, dateTo, title }: BookTabProps) {
   // General Ledger has its own account selector, render separately
   if (bookKey === 'general-ledger') {
     return <GeneralLedgerSection dateFrom={dateFrom} dateTo={dateTo} />;
@@ -52,7 +53,7 @@ export function BookTab({ bookKey, dateFrom, dateTo }: BookTabProps) {
   // Route to appropriate table component based on book type
   switch (bookKey) {
     case 'general-journal':
-      return <GeneralJournalTable data={data} totals={data.totals} />;
+      return <GeneralJournalTable data={data} totals={data.totals} title={title} />;
 
     case 'cash':
     case 'bank':

@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { formatDateVN } from '@amounzer/shared';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, ChevronDown, Search, X } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import {
   Table,
@@ -13,6 +13,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 
 import type { ApiBookResponse, JournalEntryLine, LedgerAccount } from '../types';
 import { COLUMN_WIDTHS } from '../constants';
@@ -105,7 +107,7 @@ export function GeneralLedgerSection({ dateFrom, dateTo }: GeneralLedgerSectionP
                   <ResizeHandle onMouseDown={startResize(3)} />
                 </TableHead>
                 <TableHead className="relative overflow-visible">
-                  Diễn giải
+                  Nội dung
                   <ResizeHandle onMouseDown={startResize(4)} />
                 </TableHead>
                 <TableHead className="relative overflow-visible">
@@ -169,21 +171,117 @@ function AccountSelector({
   selectedAccountId: string;
   onSelect: (id: string) => void;
 }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const selectedAccount = accounts.find((a) => a.id === selectedAccountId);
+
+  const filteredAccounts = useMemo(() => {
+    if (!searchQuery) return accounts;
+    const query = searchQuery.toLowerCase();
+    return accounts.filter(
+      (a) =>
+        a.code.toLowerCase().includes(query) ||
+        a.name.toLowerCase().includes(query)
+    );
+  }, [accounts, searchQuery]);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Focus input when dropdown opens
+  useEffect(() => {
+    if (isOpen && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [isOpen]);
+
+  const handleSelect = (account: LedgerAccount) => {
+    onSelect(account.id);
+    setIsOpen(false);
+    setSearchQuery('');
+  };
+
+  const handleClear = () => {
+    onSelect('');
+    setSearchQuery('');
+  };
+
   return (
     <div className="flex items-center gap-3 px-4 pt-4">
       <label className="text-sm font-medium whitespace-nowrap">Tài khoản:</label>
-      <select
-        value={selectedAccountId}
-        onChange={(e) => onSelect(e.target.value)}
-        className="border rounded px-2 py-1.5 text-sm bg-background w-80"
-      >
-        <option value="">— Chọn tài khoản để xem sổ cái —</option>
-        {accounts.map((a) => (
-          <option key={a.id} value={a.id}>
-            {a.code} — {a.name}
-          </option>
-        ))}
-      </select>
+      <div className="relative w-96" ref={dropdownRef}>
+        <Button
+          type="button"
+          variant="outline"
+          role="combobox"
+          aria-expanded={isOpen}
+          className="w-full justify-between text-left font-normal"
+          onClick={() => setIsOpen(!isOpen)}
+        >
+          <span className={selectedAccount ? '' : 'text-muted-foreground'}>
+            {selectedAccount
+              ? `${selectedAccount.code} — ${selectedAccount.name}`
+              : '— Chọn tài khoản để xem sổ cái —'}
+          </span>
+          <div className="flex items-center gap-1">
+            {selectedAccount && (
+              <X
+                className="h-4 w-4 shrink-0 opacity-50 hover:opacity-100"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleClear();
+                }}
+              />
+            )}
+            <ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
+          </div>
+        </Button>
+        {isOpen && (
+          <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-lg">
+            <div className="flex items-center border-b px-3 py-2">
+              <Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
+              <Input
+                ref={inputRef}
+                placeholder="Tìm mã hoặc tên tài khoản..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="h-8 border-0 focus-visible:ring-0 focus-visible:ring-offset-0"
+              />
+            </div>
+            <div className="max-h-64 overflow-y-auto p-1">
+              {filteredAccounts.length === 0 ? (
+                <div className="py-6 text-center text-sm text-muted-foreground">
+                  Không tìm thấy tài khoản
+                </div>
+              ) : (
+                filteredAccounts.map((a) => (
+                  <div
+                    key={a.id}
+                    className={`flex cursor-pointer items-center rounded-sm px-2 py-1.5 text-sm hover:bg-accent ${
+                      a.id === selectedAccountId ? 'bg-accent' : ''
+                    }`}
+                    onClick={() => handleSelect(a)}
+                  >
+                    <span className="font-mono text-xs w-16">{a.code}</span>
+                    <span className="ml-2">{a.name}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -213,7 +311,11 @@ function LedgerLineRow({ line, openingBal }: { line: JournalEntryLine; openingBa
     openingBal + toNumber(line.debitAmount) - toNumber(line.creditAmount);
   const contra = line.contraAccounts?.[0];
   const je = line.journalEntry;
+  const v = line.voucher;
   const isNeg = line.isNegativeBalance || runBal < 0;
+
+  // Get content from voucher.description first, then fall back to line/journalEntry
+  const noiDung = v?.description || line.description || je?.description || '';
 
   return (
     <TableRow className={isNeg ? 'bg-red-50 text-red-700' : ''}>
@@ -224,7 +326,7 @@ function LedgerLineRow({ line, openingBal }: { line: JournalEntryLine; openingBa
       </TableCell>
       <TableCell className="font-medium text-xs">{je?.entryNumber ?? ''}</TableCell>
       <TableCell className="max-w-[200px] truncate text-xs">
-        {line.description || je?.description || ''}
+        {noiDung}
       </TableCell>
       <TableCell className="font-mono text-xs" title={contra?.name || undefined}>
         {contra ? contra.code : ''}
