@@ -13,6 +13,7 @@ import { numberToVietnameseWords } from '@amounzer/shared';
 interface VoucherLineData {
   accountId: string;
   description?: string;
+  note?: string;
   debitAmount: number;
   creditAmount: number;
   customerId?: string;
@@ -174,6 +175,7 @@ export class VoucherService {
           lines: data.lines.map((line, index) => ({
             accountId: line.accountId,
             description: line.description,
+            note: line.note,
             debitAmount: line.debitAmount,
             creditAmount: line.creditAmount,
             lineOrder: index + 1,

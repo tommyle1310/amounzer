@@ -32,6 +32,7 @@ export class JournalEntryController {
       lines: Array<{
         accountId: string;
         description?: string;
+        note?: string;
         debitAmount: number;
         creditAmount: number;
         lineOrder?: number;

@@ -56,6 +56,7 @@ export class VoucherController {
       lines: Array<{
         accountId: string;
         description?: string;
+        note?: string;
         debitAmount: number;
         creditAmount: number;
         customerId?: string;

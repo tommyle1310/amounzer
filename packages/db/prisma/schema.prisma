@@ -265,6 +265,7 @@ model JournalEntryLine {
   journalEntryId String
   accountId      String
   description    String?
+  note           String?  // Ghi chú (user notes for each line)
   debitAmount    Decimal @default(0) @db.Decimal(18, 0)
   creditAmount   Decimal @default(0) @db.Decimal(18, 0)
   lineOrder      Int

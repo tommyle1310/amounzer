@@ -29,16 +29,6 @@ interface Account {
   nameEn?: string;
 }
 
-interface Partner {
-  id: string;
-  code: string;
-  name: string;
-  taxCode?: string;
-  address?: string;
-}
-
-type PartnerType = 'customer' | 'vendor' | 'employee' | 'other' | '';
-
 interface FiscalYear {
   id: string;
   name: string;
@@ -53,6 +43,7 @@ interface JournalLine {
   accountName: string;
   debitAmount: number;
   creditAmount: number;
+  note: string;
   isExpanded?: boolean;
 }
 
@@ -62,6 +53,7 @@ const emptyLine = (): JournalLine => ({
   accountName: '',
   debitAmount: 0,
   creditAmount: 0,
+  note: '',
   isExpanded: false,
 });
 
@@ -74,20 +66,7 @@ export default function NewCTGSPage() {
   const [error, setError] = useState('');
   const [activeAccountLine, setActiveAccountLine] = useState<number | null>(null);
   const [debouncedAccountQuery, setDebouncedAccountQuery] = useState('');
-  
-  // Partner (đối tượng) fields
-  const [partnerType, setPartnerType] = useState<PartnerType>('');
-  const [partnerQuery, setPartnerQuery] = useState('');
-  const [debouncedPartnerQuery, setDebouncedPartnerQuery] = useState('');
-  const [selectedPartner, setSelectedPartner] = useState<Partner | null>(null);
-  const [showPartnerSuggestions, setShowPartnerSuggestions] = useState(false);
-  const [partnerHighlightIndex, setPartnerHighlightIndex] = useState(-1);
   const [accountHighlightIndex, setAccountHighlightIndex] = useState(-1);
-  
-  // Manual input for 'other' type
-  const [otherPartnerName, setOtherPartnerName] = useState('');
-  const [otherPartnerTaxCode, setOtherPartnerTaxCode] = useState('');
-  const [otherPartnerAddress, setOtherPartnerAddress] = useState('');
 
   // Fetch fiscal years for the company
   const { data: fiscalYears = [] } = useQuery<FiscalYear[]>({
@@ -116,14 +95,6 @@ export default function NewCTGSPage() {
     return () => clearTimeout(timer);
   }, [activeAccountLine, lines]);
 
-  // Debounce partner search query (300ms)
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedPartnerQuery(partnerQuery);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [partnerQuery]);
-
   // Accounts search with debounced query
   const { data: accounts = [] } = useQuery<Account[]>({
     queryKey: ['accounts-search', debouncedAccountQuery],
@@ -135,36 +106,6 @@ export default function NewCTGSPage() {
     staleTime: 0,
     gcTime: 30_000, // 30 seconds cache
   });
-
-  // Customer search
-  const { data: customersData } = useQuery<{ data: Partner[] }>({
-    queryKey: ['customers-search', debouncedPartnerQuery],
-    queryFn: () => apiClient.get(`/customers?search=${encodeURIComponent(debouncedPartnerQuery)}`),
-    enabled: partnerType === 'customer' && debouncedPartnerQuery.length >= 1,
-  });
-
-  // Vendor search
-  const { data: vendorsData } = useQuery<{ data: Partner[] }>({
-    queryKey: ['vendors-search', debouncedPartnerQuery],
-    queryFn: () => apiClient.get(`/vendors?search=${encodeURIComponent(debouncedPartnerQuery)}`),
-    enabled: partnerType === 'vendor' && debouncedPartnerQuery.length >= 1,
-  });
-
-  // Employee search
-  const { data: employeesData } = useQuery<{ data: Partner[] }>({
-    queryKey: ['employees-search', debouncedPartnerQuery],
-    queryFn: () => apiClient.get(`/payroll/employees?search=${encodeURIComponent(debouncedPartnerQuery)}`),
-    enabled: partnerType === 'employee' && debouncedPartnerQuery.length >= 1,
-  });
-
-  const partners = useMemo(() => {
-    switch (partnerType) {
-      case 'customer': return customersData?.data ?? [];
-      case 'vendor': return vendorsData?.data ?? [];
-      case 'employee': return employeesData?.data ?? [];
-      default: return [];
-    }
-  }, [partnerType, customersData?.data, vendorsData?.data, employeesData?.data]);
 
   const createMutation = useMutation({
     mutationFn: (payload: unknown) => apiClient.post('/vouchers', payload),
@@ -178,36 +119,8 @@ export default function NewCTGSPage() {
 
   // Reset highlight index when results change
   useEffect(() => {
-    setPartnerHighlightIndex(-1);
-  }, [partners]);
-
-  useEffect(() => {
     setAccountHighlightIndex(-1);
   }, [accounts]);
-
-  // Keyboard handler for partner dropdown
-  const handlePartnerKeyDown = (e: React.KeyboardEvent) => {
-    if (!showPartnerSuggestions || partners.length === 0) return;
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setPartnerHighlightIndex((prev) => (prev < partners.length - 1 ? prev + 1 : 0));
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setPartnerHighlightIndex((prev) => (prev > 0 ? prev - 1 : partners.length - 1));
-    } else if (e.key === 'Enter' && partnerHighlightIndex >= 0) {
-      e.preventDefault();
-      const p = partners[partnerHighlightIndex];
-      if (p) {
-        setSelectedPartner(p);
-        setPartnerQuery(`${p.code} - ${p.name}`);
-        setShowPartnerSuggestions(false);
-        setPartnerHighlightIndex(-1);
-      }
-    } else if (e.key === 'Escape') {
-      setShowPartnerSuggestions(false);
-      setPartnerHighlightIndex(-1);
-    }
-  };
 
   // Keyboard handler for account dropdown
   const handleAccountKeyDown = (e: React.KeyboardEvent, idx: number) => {
@@ -259,12 +172,6 @@ export default function NewCTGSPage() {
     }
     setError('');
     
-    // Determine partner info based on type
-    const isOther = partnerType === 'other';
-    const partyName = isOther ? otherPartnerName : selectedPartner?.name;
-    const partyTaxCode = isOther ? otherPartnerTaxCode : selectedPartner?.taxCode;
-    const partyAddress = isOther ? otherPartnerAddress : selectedPartner?.address;
-    
     createMutation.mutate({
       voucherType: 'CTGS',
       date: new Date(date).toISOString(),
@@ -272,15 +179,10 @@ export default function NewCTGSPage() {
       totalAmount: totalDebit,
       amountInWords: numberToVietnameseWords(totalDebit, 'đồng'),
       fiscalYearId: currentFiscalYear.id,
-      customerId: partnerType === 'customer' ? selectedPartner?.id : undefined,
-      vendorId: partnerType === 'vendor' ? selectedPartner?.id : undefined,
-      employeeId: partnerType === 'employee' ? selectedPartner?.id : undefined,
-      partyName,
-      partyTaxCode,
-      partyAddress,
-      lines: validLines.map(({ accountId, debitAmount, creditAmount }) => ({
+      lines: validLines.map(({ accountId, debitAmount, creditAmount, note }) => ({
         accountId,
         description: description, // Use main voucher description for all lines
+        note: note || undefined,
         debitAmount: Number(debitAmount) || 0,
         creditAmount: Number(creditAmount) || 0,
       })),
@@ -334,116 +236,6 @@ export default function NewCTGSPage() {
               <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
             </div>
             
-            {/* Partner (đối tượng) fields */}
-            <div className="space-y-2">
-              <Label>Loại đối tượng</Label>
-              <select
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                value={partnerType}
-                onChange={(e) => {
-                  setPartnerType(e.target.value as PartnerType);
-                  setSelectedPartner(null);
-                  setPartnerQuery('');
-                  setOtherPartnerName('');
-                  setOtherPartnerTaxCode('');
-                  setOtherPartnerAddress('');
-                }}
-              >
-                <option value="">-- Không chọn --</option>
-                <option value="customer">Khách hàng</option>
-                <option value="vendor">Nhà cung cấp</option>
-                <option value="employee">Nhân viên</option>
-                <option value="other">Đối tượng khác</option>
-              </select>
-            </div>
-            
-            {partnerType === 'other' ? (
-              // Manual input for 'other' type
-              <div className="space-y-2">
-                <Label>Tên đối tượng *</Label>
-                <Input
-                  value={otherPartnerName}
-                  onChange={(e) => setOtherPartnerName(e.target.value)}
-                  placeholder="Nhập tên đối tượng"
-                />
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <Label>Đối tượng {partnerType ? '' : '(tùy chọn)'}</Label>
-                <div className="relative">
-                  <Input
-                    value={partnerQuery}
-                    onChange={(e) => {
-                      setPartnerQuery(e.target.value);
-                      setShowPartnerSuggestions(true);
-                    }}
-                    onFocus={() => setShowPartnerSuggestions(true)}
-                    onBlur={() => setTimeout(() => setShowPartnerSuggestions(false), 200)}
-                    onKeyDown={handlePartnerKeyDown}
-                    placeholder={partnerType ? `Tìm ${partnerType === 'customer' ? 'khách hàng' : partnerType === 'vendor' ? 'nhà cung cấp' : 'nhân viên'}...` : 'Chọn loại đối tượng trước'}
-                    disabled={!partnerType}
-                  />
-                  {showPartnerSuggestions && partners.length > 0 && partnerQuery.length >= 1 && (
-                    <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-48 overflow-y-auto rounded-md border bg-background shadow-md">
-                      {partners.map((p) => (
-                        <button
-                          key={p.id}
-                          type="button"
-                          className={`flex w-full flex-col items-start gap-0.5 px-3 py-2 text-sm hover:bg-accent ${partners.indexOf(p) === partnerHighlightIndex ? 'bg-accent' : ''}`}
-                          onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => {
-                            setSelectedPartner(p);
-                            setPartnerQuery(`${p.code} - ${p.name}`);
-                            setShowPartnerSuggestions(false);
-                            setPartnerHighlightIndex(-1);
-                          }}
-                        >
-                          <span className="font-medium">{p.code} - {p.name}</span>
-                          {p.taxCode && <span className="text-xs text-muted-foreground">MST: {p.taxCode}</span>}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-            
-            <div className="space-y-2">
-              <Label>MST (Mã số thuế)</Label>
-              {partnerType === 'other' ? (
-                <Input
-                  value={otherPartnerTaxCode}
-                  onChange={(e) => setOtherPartnerTaxCode(e.target.value)}
-                  placeholder="Nhập mã số thuế (tùy chọn)"
-                />
-              ) : (
-                <Input
-                  value={selectedPartner?.taxCode ?? ''}
-                  readOnly
-                  className="bg-muted"
-                  placeholder="Tự động điền từ đối tượng"
-                />
-              )}
-            </div>
-            
-            <div className="space-y-2">
-              <Label>Địa chỉ</Label>
-              {partnerType === 'other' ? (
-                <Input
-                  value={otherPartnerAddress}
-                  onChange={(e) => setOtherPartnerAddress(e.target.value)}
-                  placeholder="Nhập địa chỉ (tùy chọn)"
-                />
-              ) : (
-                <Input
-                  value={selectedPartner?.address ?? ''}
-                  readOnly
-                  className="bg-muted"
-                  placeholder="Tự động điền từ đối tượng"
-                />
-              )}
-            </div>
-            
             <div className="space-y-2 sm:col-span-2">
               <Label>Nội dung *</Label>
               <Input
@@ -451,22 +243,6 @@ export default function NewCTGSPage() {
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="Diễn giải chứng từ ghi sổ"
                 required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Tổng số tiền</Label>
-              <Input
-                value={formatVND(totalDebit)}
-                readOnly
-                className="bg-muted font-mono font-bold"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Số tiền bằng chữ</Label>
-              <Input
-                value={numberToVietnameseWords(totalDebit, 'đồng')}
-                readOnly
-                className="bg-muted italic text-sm"
               />
             </div>
           </CardContent>
@@ -491,10 +267,11 @@ export default function NewCTGSPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-10">#</TableHead>
-                  <TableHead className="w-32">TK đối ứng</TableHead>
-                  <TableHead className="min-w-[200px]">Diễn giải (Tên TK)</TableHead>
-                  <TableHead className="w-36 text-right">Nợ (₫)</TableHead>
-                  <TableHead className="w-36 text-right">Có (₫)</TableHead>
+                  <TableHead className="w-28">TK đối ứng</TableHead>
+                  <TableHead>Diễn giải (Tên TK)</TableHead>
+                  <TableHead className="w-40">Ghi chú</TableHead>
+                  <TableHead className="w-32 text-right">Nợ (₫)</TableHead>
+                  <TableHead className="w-32 text-right">Có (₫)</TableHead>
                   <TableHead className="w-10" />
                 </TableRow>
               </TableHeader>
@@ -546,23 +323,32 @@ export default function NewCTGSPage() {
                     <TableCell>
                       {line.accountName ? (
                         <div
-                          className="text-sm cursor-pointer hover:bg-muted/50 px-2 py-1 rounded"
+                          className="text-sm cursor-pointer hover:bg-muted/50 px-2 py-1 rounded flex items-start gap-1"
                           onClick={() => updateLine(idx, 'isExpanded', !line.isExpanded)}
-                          title="Click để mở rộng"
+                          title="Click để mở rộng/thu gọn"
                         >
-                          <div className={`${line.isExpanded ? '' : 'truncate max-w-[180px]'}`}>
+                          <span className={line.isExpanded ? 'whitespace-normal' : 'line-clamp-1'}>
                             {line.accountName}
-                          </div>
-                          {!line.isExpanded && line.accountName.length > 25 && (
-                            <ChevronDown className="inline h-3 w-3 text-muted-foreground ml-1" />
-                          )}
-                          {line.isExpanded && (
-                            <ChevronUp className="inline h-3 w-3 text-muted-foreground ml-1" />
+                          </span>
+                          {line.accountName.length > 30 && (
+                            line.isExpanded ? (
+                              <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" />
+                            ) : (
+                              <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                            )
                           )}
                         </div>
                       ) : (
                         <span className="text-muted-foreground text-sm italic">Chọn tài khoản</span>
                       )}
+                    </TableCell>
+                    <TableCell>
+                      <Input
+                        value={line.note}
+                        onChange={(e) => updateLine(idx, 'note', e.target.value)}
+                        placeholder="Ghi chú"
+                        className="text-sm"
+                      />
                     </TableCell>
                     <TableCell>
                       <Input
@@ -617,7 +403,7 @@ export default function NewCTGSPage() {
               </TableBody>
               <TableFooter>
                 <TableRow>
-                  <TableCell colSpan={3} className="text-right font-medium">
+                  <TableCell colSpan={4} className="text-right font-medium">
                     Tổng cộng
                   </TableCell>
                   <TableCell className="text-right font-mono font-bold">
@@ -629,7 +415,7 @@ export default function NewCTGSPage() {
                   <TableCell />
                 </TableRow>
                 <TableRow>
-                  <TableCell colSpan={3} className="text-right font-medium">
+                  <TableCell colSpan={4} className="text-right font-medium">
                     Chênh lệch
                   </TableCell>
                   <TableCell
@@ -640,6 +426,17 @@ export default function NewCTGSPage() {
                   </TableCell>
                   <TableCell />
                 </TableRow>
+                {isBalanced && totalDebit > 0 && (
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-right font-medium">
+                        Số tiền bằng chữ
+                      </TableCell>
+                      <TableCell colSpan={2} className="text-right italic text-sm">
+                        {numberToVietnameseWords(totalDebit, 'đồng')}
+                      </TableCell>
+                      <TableCell />
+                    </TableRow>
+                )}
               </TableFooter>
             </Table>
           </CardContent>

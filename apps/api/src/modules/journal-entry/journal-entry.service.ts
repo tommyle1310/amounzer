@@ -11,6 +11,7 @@ import { AuditService } from '../audit/audit.service';
 interface JournalEntryLineData {
   accountId: string;
   description?: string;
+  note?: string;
   debitAmount: number;
   creditAmount: number;
   lineOrder?: number;
@@ -108,6 +109,7 @@ export class JournalEntryService {
           create: data.lines.map((line, index) => ({
             accountId: line.accountId,
             description: line.description,
+            note: line.note,
             debitAmount: line.debitAmount || 0,
             creditAmount: line.creditAmount || 0,
             lineOrder: line.lineOrder ?? index + 1,

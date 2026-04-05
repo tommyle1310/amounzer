@@ -43,6 +43,7 @@ interface JournalLine {
   accountName: string;
   debitAmount: number;
   creditAmount: number;
+  note: string;
   isExpanded?: boolean;
 }
 
@@ -52,17 +53,9 @@ const emptyLine = (): JournalLine => ({
   accountName: '',
   debitAmount: 0,
   creditAmount: 0,
+  note: '',
   isExpanded: false,
 });
-
-// Currency options for foreign currency support
-const CURRENCIES = [
-  { code: 'VND', name: 'Việt Nam Đồng' },
-  { code: 'USD', name: 'US Dollar' },
-  { code: 'EUR', name: 'Euro' },
-  { code: 'JPY', name: 'Japanese Yen' },
-  { code: 'CNY', name: 'Chinese Yuan' },
-];
 
 export default function NewVoucherPage() {
   const router = useRouter();
@@ -83,20 +76,12 @@ export default function NewVoucherPage() {
   
   // Legal document fields (TT200/TT133 compliance)
   const [showLegalFields, setShowLegalFields] = useState(false);
-  const [voucherBookNo, setVoucherBookNo] = useState('');
   const [partyFullName, setPartyFullName] = useState('');
   const [partyAddress, setPartyAddress] = useState('');
   const [partyTaxCode, setPartyTaxCode] = useState('');
-  const [partyIdNumber, setPartyIdNumber] = useState('');
-  const [amountInWords, setAmountInWords] = useState('');
-  const [amountInWordsOverride, setAmountInWordsOverride] = useState(false);
-  const [attachmentCount, setAttachmentCount] = useState(0);
-  const [originalDocRefs, setOriginalDocRefs] = useState('');
   
-  // Foreign currency fields
-  const [currency, setCurrency] = useState('VND');
-  const [originalAmount, setOriginalAmount] = useState<number | ''>('');
-  const [exchangeRate, setExchangeRate] = useState<number>(1);
+  // Supporting documents (outside legal section)
+  const [originalDocRefs, setOriginalDocRefs] = useState('');
 
   // Fetch fiscal years for the company
   const { data: fiscalYears = [] } = useQuery<FiscalYear[]>({
@@ -242,15 +227,6 @@ export default function NewVoucherPage() {
   const noFiscalYearForDate = !currentFiscalYear && fiscalYears.length > 0;
   const noFiscalYearAtAll = fiscalYears.length === 0;
 
-  // Auto-generate amount in words when total changes (unless manually overridden)
-  useEffect(() => {
-    if (!amountInWordsOverride && totalDebit > 0) {
-      const currencyWord = currency === 'VND' ? 'đồng' : currency;
-      const amount = currency === 'VND' ? totalDebit : (originalAmount || totalDebit);
-      setAmountInWords(numberToVietnameseWords(amount, currencyWord));
-    }
-  }, [totalDebit, currency, originalAmount, amountInWordsOverride]);
-
   // Auto-fill partyFullName from counterparty when selected
   useEffect(() => {
     if (counterpartyName && !partyFullName) {
@@ -279,7 +255,6 @@ export default function NewVoucherPage() {
     createMutation.mutate({
       voucherType,
       date: new Date(date).toISOString(),
-      voucherBookNo: voucherBookNo || undefined,
       
       // Transaction party info
       counterpartyId: counterpartyId || undefined,
@@ -287,25 +262,19 @@ export default function NewVoucherPage() {
       partyFullName: partyFullName || finalCounterpartyName,
       partyAddress: partyAddress || undefined,
       partyTaxCode: partyTaxCode || undefined,
-      partyIdNumber: partyIdNumber || undefined,
       
       description,
       totalAmount: totalDebit,
-      amountInWords: amountInWords || undefined,
-      
-      // Foreign currency
-      currency: currency !== 'VND' ? currency : undefined,
-      originalAmount: currency !== 'VND' && originalAmount ? originalAmount : undefined,
-      exchangeRate: currency !== 'VND' ? exchangeRate : undefined,
+      amountInWords: numberToVietnameseWords(totalDebit, 'đồng'),
       
       // Supporting documents
-      attachmentCount: attachmentCount || 0,
       originalDocRefs: originalDocRefs || undefined,
       
       fiscalYearId: currentFiscalYear.id,
-      lines: validLines.map(({ accountId, debitAmount, creditAmount }) => ({
+      lines: validLines.map(({ accountId, debitAmount, creditAmount, note }) => ({
         accountId,
         description, // Use voucher description for all lines
+        note: note || undefined,
         debitAmount: Number(debitAmount) || 0,
         creditAmount: Number(creditAmount) || 0,
       })),
@@ -411,7 +380,7 @@ export default function NewVoucherPage() {
                 </div>
               )}
             </div>
-            <div className="space-y-2 sm:col-span-2 lg:col-span-4">
+            <div className="space-y-2 sm:col-span-2 lg:col-span-3">
               <Label>Nội dung</Label>
               <Input
                 value={description}
@@ -420,20 +389,12 @@ export default function NewVoucherPage() {
                 required
               />
             </div>
-            <div className="space-y-2 sm:col-span-2">
-              <Label>Tổng số tiền</Label>
+            <div className="space-y-2">
+              <Label>Chứng từ gốc</Label>
               <Input
-                value={formatVND(totalDebit)}
-                readOnly
-                className="bg-muted font-mono font-bold"
-              />
-            </div>
-            <div className="space-y-2 sm:col-span-2">
-              <Label>Số tiền bằng chữ</Label>
-              <Input
-                value={amountInWords || numberToVietnameseWords(totalDebit, currency === 'VND' ? 'đồng' : currency)}
-                readOnly
-                className="bg-muted italic"
+                value={originalDocRefs}
+                onChange={(e) => setOriginalDocRefs(e.target.value)}
+                placeholder="Hóa đơn số..., Hợp đồng..."
               />
             </div>
           </CardContent>
@@ -452,7 +413,6 @@ export default function NewVoucherPage() {
           </CardHeader>
           {showLegalFields && (
             <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              {/* Party Information */}
               <div className="space-y-2 sm:col-span-2">
                 <Label>Họ tên người {voucherType === 'PT' ? 'nộp' : 'nhận'} tiền</Label>
                 <Input
@@ -475,118 +435,6 @@ export default function NewVoucherPage() {
                   value={partyTaxCode}
                   onChange={(e) => setPartyTaxCode(e.target.value)}
                   placeholder="Mã số thuế"
-                />
-              </div>
-              {/* <div className="space-y-2">
-                <Label>CMND/CCCD</Label>
-                <Input
-                  value={partyIdNumber}
-                  onChange={(e) => setPartyIdNumber(e.target.value)}
-                  placeholder="Số CMND/CCCD/Hộ chiếu"
-                />
-              </div> */}
-
-              {/* Override Amount in Words - Optional */}
-              <div className="space-y-2 sm:col-span-2 lg:col-span-4">
-                <div className="flex items-center gap-2">
-                  <Label>Ghi đè số tiền bằng chữ (nếu cần)</Label>
-                  <label className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <input
-                      type="checkbox"
-                      checked={amountInWordsOverride}
-                      onChange={(e) => setAmountInWordsOverride(e.target.checked)}
-                      className="h-3 w-3"
-                    />
-                    Chỉnh sửa
-                  </label>
-                </div>
-                <Input
-                  value={amountInWords}
-                  onChange={(e) => {
-                    setAmountInWords(e.target.value);
-                    setAmountInWordsOverride(true);
-                  }}
-                  placeholder="Để trống sẽ tự động tạo"
-                  readOnly={!amountInWordsOverride}
-                  className={!amountInWordsOverride ? 'bg-muted' : ''}
-                />
-              </div>
-
-              {/* Foreign Currency */}
-              <div className="space-y-2">
-                <Label>Loại tiền</Label>
-                <select
-                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                  value={currency}
-                  onChange={(e) => setCurrency(e.target.value)}
-                >
-                  {CURRENCIES.map((c) => (
-                    <option key={c.code} value={c.code}>
-                      {c.code} - {c.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              {currency !== 'VND' && (
-                <>
-                  <div className="space-y-2">
-                    <Label>Số tiền nguyên tệ</Label>
-                    <Input
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={originalAmount}
-                      onChange={(e) => setOriginalAmount(e.target.value ? parseFloat(e.target.value) : '')}
-                      placeholder={`Số tiền ${currency}`}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Tỷ giá</Label>
-                    <Input
-                      type="number"
-                      min={0}
-                      step="0.000001"
-                      value={exchangeRate}
-                      onChange={(e) => setExchangeRate(parseFloat(e.target.value) || 1)}
-                      placeholder="Tỷ giá quy đổi VND"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Số tiền quy đổi VND</Label>
-                    <Input
-                      value={originalAmount ? formatVND(Number(originalAmount) * exchangeRate) : ''}
-                      readOnly
-                      className="bg-muted font-mono"
-                    />
-                  </div>
-                </>
-              )}
-
-              {/* Supporting Documents */}
-              <div className="space-y-2">
-                <Label>Quyển số</Label>
-                <Input
-                  value={voucherBookNo}
-                  onChange={(e) => setVoucherBookNo(e.target.value)}
-                  placeholder="Quyển số (nếu có)"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Kèm theo ... chứng từ gốc</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  value={attachmentCount || ''}
-                  onChange={(e) => setAttachmentCount(parseInt(e.target.value) || 0)}
-                  placeholder="Số chứng từ kèm theo"
-                />
-              </div>
-              <div className="space-y-2 sm:col-span-2">
-                <Label>Chứng từ gốc</Label>
-                <Input
-                  value={originalDocRefs}
-                  onChange={(e) => setOriginalDocRefs(e.target.value)}
-                  placeholder="Hóa đơn số..., Hợp đồng số..., Phiếu nhập kho..."
                 />
               </div>
             </CardContent>
@@ -612,10 +460,11 @@ export default function NewVoucherPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-10">#</TableHead>
-                  <TableHead className="w-32">TK đối ứng</TableHead>
-                  <TableHead className="min-w-[200px]">Diễn giải (Tên TK)</TableHead>
-                  <TableHead className="w-40 text-right">Nợ (₫)</TableHead>
-                  <TableHead className="w-40 text-right">Có (₫)</TableHead>
+                  <TableHead className="w-28">TK đối ứng</TableHead>
+                  <TableHead>Diễn giải (Tên TK)</TableHead>
+                  <TableHead className="w-40">Ghi chú</TableHead>
+                  <TableHead className="w-32 text-right">Nợ (₫)</TableHead>
+                  <TableHead className="w-32 text-right">Có (₫)</TableHead>
                   <TableHead className="w-10" />
                 </TableRow>
               </TableHeader>
@@ -667,23 +516,32 @@ export default function NewVoucherPage() {
                     <TableCell>
                       {line.accountName ? (
                         <div
-                          className="text-sm cursor-pointer hover:bg-muted/50 px-2 py-1 rounded"
+                          className="text-sm cursor-pointer hover:bg-muted/50 px-2 py-1 rounded flex items-start gap-1"
                           onClick={() => updateLine(idx, 'isExpanded', !line.isExpanded)}
-                          title="Click để mở rộng"
+                          title="Click để mở rộng/thu gọn"
                         >
-                          <div className={`${line.isExpanded ? '' : 'truncate max-w-[180px]'}`}>
+                          <span className={line.isExpanded ? 'whitespace-normal' : 'line-clamp-1'}>
                             {line.accountName}
-                          </div>
-                          {!line.isExpanded && line.accountName.length > 25 && (
-                            <ChevronDown className="inline h-3 w-3 text-muted-foreground ml-1" />
-                          )}
-                          {line.isExpanded && (
-                            <ChevronUp className="inline h-3 w-3 text-muted-foreground ml-1" />
+                          </span>
+                          {line.accountName.length > 30 && (
+                            line.isExpanded ? (
+                              <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" />
+                            ) : (
+                              <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                            )
                           )}
                         </div>
                       ) : (
                         <span className="text-muted-foreground text-sm italic">Chọn tài khoản</span>
                       )}
+                    </TableCell>
+                    <TableCell>
+                      <Input
+                        value={line.note}
+                        onChange={(e) => updateLine(idx, 'note', e.target.value)}
+                        placeholder="Ghi chú"
+                        className="text-sm"
+                      />
                     </TableCell>
                     <TableCell>
                       <Input
@@ -738,7 +596,7 @@ export default function NewVoucherPage() {
               </TableBody>
               <TableFooter>
                 <TableRow>
-                  <TableCell colSpan={3} className="text-right font-medium">
+                  <TableCell colSpan={4} className="text-right font-medium">
                     Tổng cộng
                   </TableCell>
                   <TableCell className="text-right font-mono font-bold">
@@ -750,7 +608,7 @@ export default function NewVoucherPage() {
                   <TableCell />
                 </TableRow>
                 <TableRow>
-                  <TableCell colSpan={3} className="text-right font-medium">
+                  <TableCell colSpan={4} className="text-right font-medium">
                     Chênh lệch
                   </TableCell>
                   <TableCell
@@ -761,6 +619,18 @@ export default function NewVoucherPage() {
                   </TableCell>
                   <TableCell />
                 </TableRow>
+                {isBalanced && totalDebit > 0 && (
+                 
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-right font-medium">
+                        Số tiền bằng chữ
+                      </TableCell>
+                      <TableCell colSpan={2} className="text-right italic text-sm">
+                        {numberToVietnameseWords(totalDebit, 'đồng')}
+                      </TableCell>
+                      <TableCell />
+                    </TableRow>
+                )}
               </TableFooter>
             </Table>
           </CardContent>
